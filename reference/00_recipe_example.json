@@ -1,0 +1,61 @@
+{
+  "recipe": [
+    {
+      "id": "reproject",
+      "type": "REPROJECT_LAS",
+      "params": {
+        "source_epsg": "X",
+        "target_epsg": "Y"
+      },
+      "inputs": ["input_las"],
+      "outputs": ["reprojected_las"]
+    },
+    {
+      "id": "dem",
+      "type": "GENERATE_DEM",
+      "params": {
+        "resolution": 1.0,
+        "method": "tin"
+      },
+      "inputs": ["reprojected_las"],
+      "outputs": ["dem_tif"]
+    },
+    {
+      "id": "hillshade",
+      "type": "GENERATE_HILLSHADE",
+      "params": {
+        "azimuth": 315,
+        "altitude": 45
+      },
+      "inputs": ["dem_tif"],
+      "outputs": ["hillshade_tif"]
+    },
+    {
+      "id": "contours",
+      "type": "GENERATE_CONTOURS",
+      "params": {
+        "interval": 1.0
+      },
+      "inputs": ["dem_tif"],
+      "outputs": ["contours_vector"]
+    },
+    {
+      "id": "overlay",
+      "type": "OVERLAY_TIF_ON_LAS",
+      "params": {
+        "band": 1
+      },
+      "inputs": ["reprojected_las", "backscatter_tif"],
+      "outputs": ["textured_las"]
+    },
+    {
+      "id": "ept",
+      "type": "BUILD_EPT",
+      "params": {
+        "resolution": "auto"
+      },
+      "inputs": ["textured_las"],
+      "outputs": ["ept_dataset"]
+    }
+  ]
+}
