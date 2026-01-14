@@ -151,6 +151,17 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
       );
     }
 
+    // Insert job outputs if provided
+    if (req.outputs) {
+      for (const [artifactName, output] of Object.entries(req.outputs)) {
+        await client.query(
+          `INSERT INTO mapprism2.job_output (job_id, artifact_name, path)
+           VALUES ($1, $2, $3)`,
+          [jobId, artifactName, output.path]
+        );
+      }
+    }
+
     await client.query("COMMIT");
     return jobId;
   } catch (error) {
