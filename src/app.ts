@@ -15,7 +15,10 @@ if (!process.env.DATABASE_URL) {
 import express, { Request, Response } from "express";
 import morgan from "morgan";
 import { authMiddleware } from "./middleware/auth";
-import { createRecipeHandler } from "./controllers/recipeController";
+import {
+  createRecipeHandler,
+  validateRecipeHandler,
+} from "./controllers/recipeController";
 import {
   createJobHandler,
   getJobStatusHandler,
@@ -47,6 +50,7 @@ app.get("/health", (_req: Request, res: Response) => {
 app.use(authMiddleware);
 
 // Recipe endpoints
+app.post("/recipes/validate", validateRecipeHandler);
 app.post("/recipes", createRecipeHandler);
 
 // Job endpoints

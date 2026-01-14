@@ -7,8 +7,10 @@
         "source_epsg": "X",
         "target_epsg": "Y"
       },
-      "inputs": ["input_las"],
-      "outputs": ["reprojected_las"]
+      "inputs": {
+        "input_las": "input_las"
+      },
+      "outputs": ["output_las"]
     },
     {
       "id": "dem",
@@ -17,8 +19,10 @@
         "resolution": 1.0,
         "method": "tin"
       },
-      "inputs": ["reprojected_las"],
-      "outputs": ["dem_tif"]
+      "inputs": {
+        "input_las": "output_las"
+      },
+      "outputs": ["output_dem"]
     },
     {
       "id": "hillshade",
@@ -27,8 +31,10 @@
         "azimuth": 315,
         "altitude": 45
       },
-      "inputs": ["dem_tif"],
-      "outputs": ["hillshade_tif"]
+      "inputs": {
+        "input_dem": "output_dem"
+      },
+      "outputs": ["output_hillshade"]
     },
     {
       "id": "contours",
@@ -36,8 +42,10 @@
       "params": {
         "interval": 1.0
       },
-      "inputs": ["dem_tif"],
-      "outputs": ["contours_vector"]
+      "inputs": {
+        "input_dem": "output_dem"
+      },
+      "outputs": ["output_contours"]
     },
     {
       "id": "overlay",
@@ -45,8 +53,11 @@
       "params": {
         "band": 1
       },
-      "inputs": ["reprojected_las", "backscatter_tif"],
-      "outputs": ["textured_las"]
+      "inputs": {
+        "input_las": "output_las",
+        "input_tif": "output_dem"
+      },
+      "outputs": ["output_las"]
     },
     {
       "id": "ept",
@@ -54,8 +65,10 @@
       "params": {
         "resolution": "auto"
       },
-      "inputs": ["textured_las"],
-      "outputs": ["ept_dataset"]
+      "inputs": {
+        "input_las": "output_las"
+      },
+      "outputs": ["output_ept"]
     }
   ]
 }

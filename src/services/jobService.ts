@@ -55,19 +55,22 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
 
   // Validate that all required initial inputs are provided
   const recipeSteps = recipe.definition.recipe;
-  const allInputs = new Set<string>();
+  const allArtifactNames = new Set<string>();
   const allOutputs = new Set<string>();
 
   for (const step of recipeSteps) {
-    step.inputs.forEach((i) => allInputs.add(i));
+    // Collect artifact names from inputs (slot -> artifact mapping)
+    for (const artifactName of Object.values(step.inputs)) {
+      allArtifactNames.add(artifactName);
+    }
     step.outputs.forEach((o) => allOutputs.add(o));
   }
 
-  // Initial inputs are those that are not produced by any step
+  // Initial inputs are artifact names that are not produced by any step
   const initialInputs = new Set<string>();
-  for (const input of allInputs) {
-    if (!allOutputs.has(input)) {
-      initialInputs.add(input);
+  for (const artifactName of allArtifactNames) {
+    if (!allOutputs.has(artifactName)) {
+      initialInputs.add(artifactName);
     }
   }
 

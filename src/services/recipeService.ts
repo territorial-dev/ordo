@@ -5,7 +5,8 @@ import { validateRecipe, ValidationError } from "../utils/validation";
 export const createRecipe = async (
   req: CreateRecipeRequest
 ): Promise<number> => {
-  validateRecipe(req.definition);
+  // Validate recipe with empty external inputs (inputs provided at job creation)
+  await validateRecipe(req.definition, new Set());
 
   const pool = getPool();
   const result = await pool.query(

@@ -46,5 +46,7 @@ CREATE TABLE mapprism2.job_artifact (
 
 CREATE TABLE mapprism2.step_executor (
   step_type     text PRIMARY KEY,
-  n8n_workflow  text NOT NULL
+  n8n_workflow  text NOT NULL,
+  accepts       jsonb NOT NULL,
+  produces      jsonb NOT NULL
 );

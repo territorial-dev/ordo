@@ -1,7 +1,7 @@
 export interface StepDefinition {
   id: string;
   type: string;
-  inputs: string[];
+  inputs: Record<string, string>; // slot name -> artifact name
   outputs: string[];
   params: Record<string, any>;
 }
@@ -80,4 +80,11 @@ export interface JobStatusResponse {
   job: Job;
   steps: JobStep[];
   artifacts: JobArtifact[];
+}
+
+export interface StepExecutor {
+  step_type: string;
+  n8n_workflow: string;
+  accepts: Record<string, string>; // artifact name -> artifact type
+  produces: Record<string, string>; // artifact name -> artifact type
 }

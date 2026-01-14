@@ -1,0 +1,85 @@
+{
+  "recipe": {
+    "name": "piney-dam-pipeline-example",
+    "version": "1.0.0",
+    "definition": {
+      "recipe": [
+        {
+          "id": "reproject",
+          "type": "REPROJECT_LAS",
+          "params": {
+            "source_epsg": "EPSG:2271",
+            "target_epsg": "EPSG:3857"
+          },
+          "inputs": {
+            "input_las": "input_las"
+          },
+          "outputs": ["output_las"]
+        },
+        {
+          "id": "dem",
+          "type": "GENERATE_DEM",
+          "params": {
+            "resolution": 1
+          },
+          "inputs": {
+            "input_las": "output_las"
+          },
+          "outputs": ["output_dem"]
+        },
+        {
+          "id": "hillshade",
+          "type": "GENERATE_HILLSHADE",
+          "params": {
+            "azimuth": 315,
+            "altitude": 45
+          },
+          "inputs": {
+            "input_dem": "output_dem"
+          },
+          "outputs": ["output_hillshade"]
+        },
+        {
+          "id": "contours",
+          "type": "GENERATE_CONTOURS",
+          "params": {
+            "interval": 1
+          },
+          "inputs": {
+            "input_dem": "output_dem"
+          },
+          "outputs": ["output_contours"]
+        },
+        {
+          "id": "overlay",
+          "type": "OVERLAY_TIF_ON_LAS",
+          "params": {
+            "band": 1
+          },
+          "inputs": {
+            "input_las": "output_las",
+            "input_tif": "output_dem"
+          },
+          "outputs": ["output_las"]
+        },
+        {
+          "id": "ept",
+          "type": "BUILD_EPT",
+          "params": {},
+          "inputs": {
+            "input_las": "output_las"
+          },
+          "outputs": ["output_ept"]
+        }
+      ]
+    }
+  },
+  "inputs": {
+    "input_las": {
+      "type": "las",
+      "uri": "development/PINEY DAM MBES 1IN.laz",
+      "hash": "abc123def456",
+      "metadata": {}
+    }
+  }
+}
