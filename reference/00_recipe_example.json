@@ -48,18 +48,6 @@
       "outputs": ["output_contours"]
     },
     {
-      "id": "overlay",
-      "type": "OVERLAY_TIF_ON_LAS",
-      "params": {
-        "band": 1
-      },
-      "inputs": {
-        "input_las": "output_las",
-        "input_tif": "output_dem"
-      },
-      "outputs": ["output_las"]
-    },
-    {
       "id": "ept",
       "type": "BUILD_EPT",
       "params": {

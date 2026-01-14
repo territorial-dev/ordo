@@ -24,6 +24,7 @@ export const validateRecipe = async (
   }
 
   const stepIds = new Set<string>();
+  const outputArtifacts = new Map<string, string>(); // artifact name -> step id
 
   // First pass: structural validation and collect step types
   for (const step of definition.recipe) {
@@ -33,6 +34,17 @@ export const validateRecipe = async (
       throw new ValidationError(`Duplicate step ID: ${step.id}`);
     }
     stepIds.add(step.id);
+
+    // Check for duplicate output artifacts
+    for (const output of step.outputs) {
+      if (outputArtifacts.has(output)) {
+        const producerStepId = outputArtifacts.get(output)!;
+        throw new ValidationError(
+          `Duplicate output artifact "${output}": produced by both step "${producerStepId}" and step "${step.id}". Each artifact name must be unique.`
+        );
+      }
+      outputArtifacts.set(output, step.id);
+    }
   }
 
   // Collect all unique step types

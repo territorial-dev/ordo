@@ -27,6 +27,7 @@ CREATE TABLE mapprism2.job_step (
   started_at  timestamptz,
   finished_at timestamptz,
   error       text,
+  blocked_until timestamptz,
 
   PRIMARY KEY (job_id, step_id)
 );

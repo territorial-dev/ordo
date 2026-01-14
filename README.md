@@ -255,18 +255,6 @@ The following example demonstrates a complete pipeline for processing LiDAR data
           "outputs": ["output_contours"]
         },
         {
-          "id": "overlay",
-          "type": "OVERLAY_TIF_ON_LAS",
-          "params": {
-            "band": 1
-          },
-          "inputs": {
-            "input_las": "output_las",
-            "input_tif": "output_dem"
-          },
-          "outputs": ["output_las"]
-        },
-        {
           "id": "ept",
           "type": "BUILD_EPT",
           "params": {},
@@ -287,8 +275,9 @@ The following example demonstrates a complete pipeline for processing LiDAR data
 2. `reproject` step binds `input_las` to its `input_las` slot and produces `output_las`
 3. `dem` step binds `output_las` to its `input_las` slot and produces `output_dem`
 4. `hillshade` and `contours` steps both bind `output_dem` to their `input_dem` slots (parallel execution)
-5. `overlay` step binds `output_las` to `input_las` slot and `output_dem` to `input_tif` slot, producing `output_las` (overwrites)
-6. `ept` step binds `output_las` to its `input_las` slot and produces `output_ept`
+5. `ept` step binds `output_las` to its `input_las` slot and produces `output_ept`
+
+**Note:** Each artifact name must be unique across all steps. No two steps can produce the same artifact name.
 
 **Explicit Slot Binding:**
 
