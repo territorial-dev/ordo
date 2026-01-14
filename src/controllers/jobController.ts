@@ -53,6 +53,26 @@ export const createJobHandler = async (
       }
     }
 
+    // Validate outputs structure if provided
+    if (body.outputs !== undefined) {
+      if (typeof body.outputs !== "object" || Array.isArray(body.outputs)) {
+        res.status(400).json({ error: "outputs must be an object" });
+        return;
+      }
+
+      for (const [artifactName, output] of Object.entries(body.outputs)) {
+        if (
+          !output.path ||
+          typeof output.path !== "string"
+        ) {
+          res.status(400).json({
+            error: `Invalid output "${artifactName}": must have path as a string`,
+          });
+          return;
+        }
+      }
+    }
+
     const jobId = await createJob(body);
     res.status(201).json({ id: jobId });
   } catch (error) {

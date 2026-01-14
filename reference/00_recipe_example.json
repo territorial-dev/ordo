@@ -1,62 +1,90 @@
 {
-  "recipe": [
-    {
-      "id": "reproject",
-      "type": "REPROJECT_LAS",
-      "params": {
-        "source_epsg": "X",
-        "target_epsg": "Y"
-      },
-      "inputs": {
-        "input_las": "input_las"
-      },
-      "outputs": ["output_las"]
-    },
-    {
-      "id": "dem",
-      "type": "GENERATE_DEM",
-      "params": {
-        "resolution": 1.0,
-        "method": "tin"
-      },
-      "inputs": {
-        "input_las": "output_las"
-      },
-      "outputs": ["output_dem"]
-    },
-    {
-      "id": "hillshade",
-      "type": "GENERATE_HILLSHADE",
-      "params": {
-        "azimuth": 315,
-        "altitude": 45
-      },
-      "inputs": {
-        "input_dem": "output_dem"
-      },
-      "outputs": ["output_hillshade"]
-    },
-    {
-      "id": "contours",
-      "type": "GENERATE_CONTOURS",
-      "params": {
-        "interval": 1.0
-      },
-      "inputs": {
-        "input_dem": "output_dem"
-      },
-      "outputs": ["output_contours"]
-    },
-    {
-      "id": "ept",
-      "type": "BUILD_EPT",
-      "params": {
-        "resolution": "auto"
-      },
-      "inputs": {
-        "input_las": "output_las"
-      },
-      "outputs": ["output_ept"]
+  "recipe": {
+    "name": "example-recipe",
+    "version": "1.0.0",
+    "definition": {
+      "recipe": [
+        {
+          "id": "reproject",
+          "type": "REPROJECT_LAS",
+          "params": {
+            "source_epsg": "X",
+            "target_epsg": "Y"
+          },
+          "inputs": {
+            "input_las": "input_las"
+          },
+          "outputs": ["output_las"]
+        },
+        {
+          "id": "dem",
+          "type": "GENERATE_DEM",
+          "params": {
+            "resolution": 1.0,
+            "method": "tin"
+          },
+          "inputs": {
+            "input_las": "output_las"
+          },
+          "outputs": ["output_dem"]
+        },
+        {
+          "id": "hillshade",
+          "type": "GENERATE_HILLSHADE",
+          "params": {
+            "azimuth": 315,
+            "altitude": 45
+          },
+          "inputs": {
+            "input_dem": "output_dem"
+          },
+          "outputs": ["output_hillshade"]
+        },
+        {
+          "id": "contours",
+          "type": "GENERATE_CONTOURS",
+          "params": {
+            "interval": 1.0
+          },
+          "inputs": {
+            "input_dem": "output_dem"
+          },
+          "outputs": ["output_contours"]
+        },
+        {
+          "id": "ept",
+          "type": "BUILD_EPT",
+          "params": {
+            "resolution": "auto"
+          },
+          "inputs": {
+            "input_las": "output_las"
+          },
+          "outputs": ["output_ept"]
+        }
+      ]
     }
-  ]
+  },
+  "inputs": {
+    "input_las": {
+      "type": "las",
+      "uri": "s3://bucket/path/to/file.las",
+      "hash": "abc123",
+      "metadata": {}
+    }
+  },
+  "outputs": {
+    "output_dem": {
+      "path": "final/dem.tif"
+    },
+    "output_hillshade": {
+      "path": "final/hillshade.tif"
+    },
+    "output_contours": {
+      "path": "final/contours.geojson"
+    },
+    "output_ept": {
+      "path": "final/ept"
+    }
+  }
 }

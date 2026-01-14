@@ -74,6 +74,12 @@ export interface CreateJobRequest {
       metadata?: Record<string, any>;
     }
   >;
+  outputs?: Record<
+    string,
+    {
+      path: string;
+    }
+  >;
 }
 
 export interface JobStatusResponse {

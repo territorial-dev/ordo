@@ -69,5 +69,19 @@
       "hash": "abc123def456",
       "metadata": {}
     }
+  },
+  "outputs": {
+    "output_dem": {
+      "path": "final/piney-dam/dem.tif"
+    },
+    "output_hillshade": {
+      "path": "final/piney-dam/hillshade.tif"
+    },
+    "output_contours": {
+      "path": "final/piney-dam/contours.geojson"
+    },
+    "output_ept": {
+      "path": "final/piney-dam/ept"
+    }
   }
 }

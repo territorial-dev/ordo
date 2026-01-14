@@ -95,6 +95,20 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     }
   }
 
+  // Validate job outputs if provided
+  if (req.outputs) {
+    const requestedOutputs = Object.keys(req.outputs);
+    for (const artifactName of requestedOutputs) {
+      if (!allOutputs.has(artifactName)) {
+        throw new Error(
+          `Invalid job output "${artifactName}": artifact is not producible by recipe. Producible artifacts: ${Array.from(
+            allOutputs
+          ).join(", ")}`
+        );
+      }
+    }
+  }
+
   // Begin transaction
   const client = await pool.connect();
   try {

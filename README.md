@@ -133,9 +133,20 @@ Create a job from a recipe.
       "hash": "abc123",
       "metadata": {}
     }
+  },
+  "outputs": {
+    "output_artifact": {
+      "path": "final/storage/path"
+    }
   }
 }
 ```
+
+**Request Fields:**
+- `recipe_id` (optional): ID of an existing recipe
+- `recipe` (optional): Recipe definition (name, version, definition) - used if `recipe_id` is not provided
+- `inputs` (required): Object mapping artifact names to artifact metadata (type, uri, hash, optional metadata)
+- `outputs` (optional): Object mapping artifact names to final destination paths. All artifact names must be producible by the recipe DAG.
 
 **Response:**
 
@@ -144,6 +155,13 @@ Create a job from a recipe.
   "id": 1
 }
 ```
+
+**Job-Level Outputs:**
+
+Job-level outputs declare which artifacts should be finalized after a job completes. The API validates that all requested outputs exist in the recipe's producible artifact set, but does not copy, move, or interact with storage. All file operations are performed by n8n workflows after job completion.
+
+- **Recipe-level outputs**: Used only to link steps in the DAG, always written to staging storage
+- **Job-level outputs**: Declared at job creation, reference artifact names produced by recipe steps, define final destination paths, imply stable/no-TTL retention
 
 ### GET /jobs/:id
 
