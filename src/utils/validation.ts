@@ -178,12 +178,6 @@ const validateStep = (step: StepDefinition): void => {
     throw new ValidationError('Step must have an "outputs" array');
   }
 
-  if (step.outputs.length === 0) {
-    throw new ValidationError(
-      `Step "${step.id}" must have at least one output`
-    );
-  }
-
   // Validate inputs object structure
   for (const [slot, artifact] of Object.entries(step.inputs)) {
     if (typeof slot !== "string" || typeof artifact !== "string") {
