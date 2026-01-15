@@ -30,6 +30,9 @@ RUN npm ci --only=production && npm cache clean --force
 # Copy built files from builder
 COPY --from=builder /app/dist ./dist
 
+# Copy migrations directory
+COPY migrations ./migrations
+
 # Expose port
 EXPOSE 3000
 
