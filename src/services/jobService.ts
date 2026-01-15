@@ -4,6 +4,7 @@ import {
   Job,
   JobStep,
   JobArtifact,
+  JobOutput,
   JobStatusResponse,
 } from "../types";
 import {
@@ -245,5 +246,21 @@ export const getJobStatus = async (
     created_at: row.created_at,
   }));
 
-  return { job, steps, artifacts };
+  // Get outputs
+  const outputsResult = await pool.query(
+    `SELECT job_id, artifact_name, path, created_at
+     FROM ${schema}.job_output
+     WHERE job_id = $1
+     ORDER BY artifact_name`,
+    [jobId]
+  );
+
+  const outputs: JobOutput[] = outputsResult.rows.map((row) => ({
+    job_id: row.job_id,
+    artifact_name: row.artifact_name,
+    path: row.path,
+    created_at: row.created_at,
+  }));
+
+  return { job, steps, artifacts, outputs };
 };

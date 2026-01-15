@@ -52,6 +52,13 @@ export interface JobArtifact {
   created_at: Date;
 }
 
+export interface JobOutput {
+  job_id: number;
+  artifact_name: string;
+  path: string;
+  created_at: Date;
+}
+
 export interface CreateRecipeRequest {
   name: string;
   version: string;
@@ -86,6 +93,7 @@ export interface JobStatusResponse {
   job: Job;
   steps: JobStep[];
   artifacts: JobArtifact[];
+  outputs: JobOutput[];
 }
 
 export interface StepExecutor {
