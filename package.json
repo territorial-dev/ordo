@@ -1,7 +1,7 @@
 {
-  "name": "mapprism-api",
+  "name": "ordo",
   "version": "1.0.0",
-  "description": "MapPrism Control Plane API",
+  "description": "Ordo is a contract-driven orchestration core for running deterministic, artifact-based DAG jobs with a strict separation between computation and delivery.",
   "main": "dist/app.js",
   "scripts": {
     "build": "tsc",

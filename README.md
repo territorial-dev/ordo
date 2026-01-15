@@ -1,6 +1,51 @@
-# MapPrism Control Plane API
+# Ordo
 
-TypeScript + Express backend API for MapPrism, a DAG-based geoprocessing system.
+## Why Ordo exists
+
+I built Ordo to solve a gap I kept running into between workflow execution and job orchestration.
+
+Tools like n8n are great at executing steps, integrating systems, and handling side effects. What they do not give you is a durable, contract-driven control plane for complex, long-running jobs where dataflow, validation, and lifecycle really matter. I kept needing something that could sit above execution, stay simple, and still be strict.
+
+Ordo is that layer.
+
+Right now, Ordo is primarily designed to work with n8n as the execution engine, where n8n workers pull work from Ordo and perform the actual computation and I/O. That said, n8n is an implementation detail, not a requirement. The orchestration model itself is intentionally generic and should apply just as well to other runners.
+
+## What Ordo does
+
+Ordo focuses on orchestration, not execution.
+
+It:
+- validates job definitions and recipes before anything runs,
+- enforces explicit input and output contracts between steps,
+- models workflows as deterministic, artifact-based DAGs,
+- tracks jobs, steps, and artifacts as first-class state,
+- separates computation from delivery and finalization,
+- and acts as a single, queryable source of truth for job state.
+
+It assumes execution happens elsewhere and keeps its own responsibilities narrow on purpose.
+
+## What Ordo does not do
+
+Ordo does not:
+- execute steps itself,
+- manage workers or infrastructure,
+- provide a workflow editor or UI,
+- try to replace tools like n8n, Airflow, or Argo,
+- or perform storage and file operations directly.
+
+Those problems are better handled by execution engines and infrastructure, not by the orchestration core.
+
+## Where Ordo might go next
+
+Today, Ordo integrates closely with n8n, including direct database-based job claiming. That is a pragmatic choice, not a fundamental constraint.
+
+Over time, I expect Ordo to evolve toward:
+- decoupling job retrieval and management from direct database access,
+- supporting queue- or API-based runners,
+- running multiple execution backends side by side,
+- and standing on its own as a reusable control plane for heterogeneous job execution.
+
+Those are natural extensions, not prerequisites.
 
 ## Setup
 
@@ -14,9 +59,12 @@ npm install
 
 ```bash
 API_TOKEN=your-secret-token-here
-DATABASE_URL=postgresql://user:password@localhost:5432/mapprism
+DATABASE_URL=postgresql://user:password@localhost:5432/ordo
+DB_SCHEMA=ordo
 PORT=3000
 ```
+
+`DB_SCHEMA` defaults to `ordo` when unset or empty. Ordo runs migrations on startup and creates the schema and tables if they do not exist.
 
 3. Build the project:
 
@@ -193,7 +241,7 @@ Health check endpoint (no authentication required).
 
 Recipes are validated against `step_executor` contracts before they can be stored. The validation ensures that:
 
-- **Step types exist**: Every step type must exist in the `mapprism2.step_executor` table
+- **Step types exist**: Every step type must exist in the `{schema}.step_executor` table
 - **Input slot binding**: All input slots must exactly match the keys defined in `step_executor.accepts` (no missing, no extra). Each slot must be bound to an artifact name.
 - **Outputs match executor contracts**: All outputs must exactly match the keys defined in `step_executor.produces` (no renamed, no additional)
 - **Artifact flow is valid**: All referenced artifact names must be available (either from external inputs or produced by previous steps)

@@ -1,13 +1,14 @@
-import { getPool } from "../db/connection";
+import { getPool, getSchema } from "../db/connection";
 import { StepExecutor } from "../types";
 
 export const getStepExecutor = async (
   stepType: string
 ): Promise<StepExecutor | null> => {
   const pool = getPool();
+  const schema = getSchema();
   const result = await pool.query(
     `SELECT step_type, n8n_workflow, accepts, produces
-     FROM mapprism2.step_executor
+     FROM ${schema}.step_executor
      WHERE step_type = $1`,
     [stepType]
   );
@@ -33,9 +34,10 @@ export const getStepExecutors = async (
   }
 
   const pool = getPool();
+  const schema = getSchema();
   const result = await pool.query(
     `SELECT step_type, n8n_workflow, accepts, produces
-     FROM mapprism2.step_executor
+     FROM ${schema}.step_executor
      WHERE step_type = ANY($1)`,
     [stepTypes]
   );

@@ -1,4 +1,4 @@
-import { getPool } from "../db/connection";
+import { getPool, getSchema } from "../db/connection";
 import { CreateRecipeRequest, Recipe } from "../types";
 import { validateRecipe, ValidationError } from "../utils/validation";
 
@@ -9,8 +9,9 @@ export const createRecipe = async (
   await validateRecipe(req.definition, new Set());
 
   const pool = getPool();
+  const schema = getSchema();
   const result = await pool.query(
-    `INSERT INTO mapprism2.recipe (name, version, definition)
+    `INSERT INTO ${schema}.recipe (name, version, definition)
      VALUES ($1, $2, $3)
      RETURNING id`,
     [req.name, req.version, JSON.stringify(req.definition)]
@@ -21,9 +22,10 @@ export const createRecipe = async (
 
 export const getRecipe = async (id: number): Promise<Recipe | null> => {
   const pool = getPool();
+  const schema = getSchema();
   const result = await pool.query(
     `SELECT id, name, version, definition, created_at
-     FROM mapprism2.recipe
+     FROM ${schema}.recipe
      WHERE id = $1`,
     [id]
   );
@@ -47,9 +49,10 @@ export const getRecipeByNameAndVersion = async (
   version: string
 ): Promise<Recipe | null> => {
   const pool = getPool();
+  const schema = getSchema();
   const result = await pool.query(
     `SELECT id, name, version, definition, created_at
-     FROM mapprism2.recipe
+     FROM ${schema}.recipe
      WHERE name = $1 AND version = $2`,
     [name, version]
   );

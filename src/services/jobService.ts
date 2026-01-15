@@ -1,4 +1,4 @@
-import { getPool } from "../db/connection";
+import { getPool, getSchema } from "../db/connection";
 import {
   CreateJobRequest,
   Job,
@@ -14,6 +14,7 @@ import {
 
 export const createJob = async (req: CreateJobRequest): Promise<number> => {
   const pool = getPool();
+  const schema = getSchema();
 
   let recipeId: number;
 
@@ -116,7 +117,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
 
     // Create job
     const jobResult = await client.query(
-      `INSERT INTO mapprism2.job (recipe_id, status)
+      `INSERT INTO ${schema}.job (recipe_id, status)
        VALUES ($1, 'pending')
        RETURNING id`,
       [recipeId]
@@ -126,7 +127,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     // Insert initial artifacts
     for (const [name, artifact] of Object.entries(req.inputs)) {
       await client.query(
-        `INSERT INTO mapprism2.job_artifact
+        `INSERT INTO ${schema}.job_artifact
          (job_id, name, type, uri, hash, producer_step, metadata)
          VALUES ($1, $2, $3, $4, $5, NULL, $6)
          ON CONFLICT (job_id, name) DO NOTHING`,
@@ -144,7 +145,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     // Insert all recipe steps as pending
     for (const step of recipeSteps) {
       await client.query(
-        `INSERT INTO mapprism2.job_step
+        `INSERT INTO ${schema}.job_step
          (job_id, step_id, step_type, status, attempt)
          VALUES ($1, $2, $3, 'pending', 0)`,
         [jobId, step.id, step.type]
@@ -155,7 +156,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     if (req.outputs) {
       for (const [artifactName, output] of Object.entries(req.outputs)) {
         await client.query(
-          `INSERT INTO mapprism2.job_output (job_id, artifact_name, path)
+          `INSERT INTO ${schema}.job_output (job_id, artifact_name, path)
            VALUES ($1, $2, $3)`,
           [jobId, artifactName, output.path]
         );
@@ -176,11 +177,12 @@ export const getJobStatus = async (
   jobId: number
 ): Promise<JobStatusResponse | null> => {
   const pool = getPool();
+  const schema = getSchema();
 
   // Get job
   const jobResult = await pool.query(
     `SELECT id, recipe_id, status, created_at, started_at, finished_at, error
-     FROM mapprism2.job
+     FROM ${schema}.job
      WHERE id = $1`,
     [jobId]
   );
@@ -204,7 +206,7 @@ export const getJobStatus = async (
   const stepsResult = await pool.query(
     `SELECT job_id, step_id, step_type, status, attempt, claimed_by, claimed_at,
             started_at, finished_at, error
-     FROM mapprism2.job_step
+     FROM ${schema}.job_step
      WHERE job_id = $1
      ORDER BY step_id`,
     [jobId]
@@ -226,7 +228,7 @@ export const getJobStatus = async (
   // Get artifacts
   const artifactsResult = await pool.query(
     `SELECT job_id, name, type, uri, hash, producer_step, metadata, created_at
-     FROM mapprism2.job_artifact
+     FROM ${schema}.job_artifact
      WHERE job_id = $1
      ORDER BY name`,
     [jobId]

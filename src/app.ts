@@ -24,6 +24,7 @@ import {
   getJobStatusHandler,
 } from "./controllers/jobController";
 import { closePool } from "./db/connection";
+import { runMigrations } from "./db/migrations";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -79,9 +80,17 @@ process.on("SIGINT", async () => {
 });
 
 if (require.main === module) {
-  app.listen(PORT, () => {
-    console.log(`MapPrism API server listening on port ${PORT}`);
-  });
+  (async () => {
+    try {
+      await runMigrations();
+      app.listen(PORT, () => {
+        console.log(`Ordo server listening on port ${PORT}`);
+      });
+    } catch (error) {
+      console.error("Failed to run migrations:", error);
+      process.exit(1);
+    }
+  })();
 }
 
 export default app;
