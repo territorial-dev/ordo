@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { createJob, getJobStatus } from "../services/jobService";
 import { CreateJobRequest } from "../types";
+import { ValidationError } from "../utils/validation";
 
 export const createJobHandler = async (
   req: Request,
@@ -76,6 +77,10 @@ export const createJobHandler = async (
     const jobId = await createJob(body);
     res.status(201).json({ id: jobId });
   } catch (error) {
+    if (error instanceof ValidationError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     if (error instanceof Error) {
       if (error.message.includes("not found")) {
         res.status(404).json({ error: error.message });
