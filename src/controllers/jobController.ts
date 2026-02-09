@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { createJob, getJobStatus } from "../services/jobService";
+import { createJob, getJobStatus, listJobs } from "../services/jobService";
 import { CreateJobRequest } from "../types";
 import { ValidationError } from "../utils/validation";
 
@@ -96,6 +96,19 @@ export const createJobHandler = async (
       }
     }
     console.error("Error creating job:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const listJobsHandler = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const jobs = await listJobs();
+    res.json(jobs);
+  } catch (error) {
+    console.error("Error listing jobs:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

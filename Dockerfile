@@ -16,7 +16,6 @@ COPY src ./src
 # Build TypeScript
 RUN npm run build
 
-# Production stage
 FROM node:20-alpine
 
 WORKDIR /app

@@ -70,3 +70,20 @@ export const getRecipeByNameAndVersion = async (
     created_at: row.created_at,
   };
 };
+
+export const listRecipes = async (): Promise<Recipe[]> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const result = await pool.query(
+    `SELECT id, name, version, definition, created_at
+     FROM ${schema}.recipe
+     ORDER BY id DESC`,
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    name: row.name,
+    version: row.version,
+    definition: row.definition,
+    created_at: row.created_at,
+  }));
+};

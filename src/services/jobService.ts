@@ -264,3 +264,22 @@ export const getJobStatus = async (
 
   return { job, steps, artifacts, outputs };
 };
+
+export const listJobs = async (): Promise<Job[]> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const result = await pool.query(
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error
+     FROM ${schema}.job
+     ORDER BY id DESC`,
+  );
+  return result.rows.map((row) => ({
+    id: row.id,
+    recipe_id: row.recipe_id,
+    status: row.status,
+    created_at: row.created_at,
+    started_at: row.started_at,
+    finished_at: row.finished_at,
+    error: row.error,
+  }));
+};

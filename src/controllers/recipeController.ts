@@ -1,5 +1,9 @@
 import { Request, Response } from "express";
-import { createRecipe, getRecipe } from "../services/recipeService";
+import {
+  createRecipe,
+  getRecipe,
+  listRecipes,
+} from "../services/recipeService";
 import { CreateRecipeRequest, RecipeDefinition } from "../types";
 import { validateRecipe, ValidationError } from "../utils/validation";
 
@@ -25,6 +29,41 @@ export const createRecipeHandler = async (
       return;
     }
     console.error("Error creating recipe:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const listRecipesHandler = async (
+  _req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const recipes = await listRecipes();
+    res.json(recipes);
+  } catch (error) {
+    console.error("Error listing recipes:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const getRecipeHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    if (isNaN(id)) {
+      res.status(400).json({ error: "Invalid recipe ID" });
+      return;
+    }
+    const recipe = await getRecipe(id);
+    if (!recipe) {
+      res.status(404).json({ error: "Recipe not found" });
+      return;
+    }
+    res.json(recipe);
+  } catch (error) {
+    console.error("Error getting recipe:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

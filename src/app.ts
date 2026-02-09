@@ -16,13 +16,24 @@ import express, { Request, Response } from "express";
 import morgan from "morgan";
 import { authMiddleware } from "./middleware/auth";
 import {
+  createJobHandler,
+  listJobsHandler,
+  getJobStatusHandler,
+} from "./controllers/jobController";
+import {
+  listRecipesHandler,
+  getRecipeHandler,
   createRecipeHandler,
   validateRecipeHandler,
 } from "./controllers/recipeController";
 import {
-  createJobHandler,
-  getJobStatusHandler,
-} from "./controllers/jobController";
+  listArtifactsHandler,
+  getArtifactHandler,
+} from "./controllers/artifactController";
+import {
+  listOutputsHandler,
+  getOutputHandler,
+} from "./controllers/outputController";
 import { closePool } from "./db/connection";
 import { runMigrations } from "./db/migrations";
 
@@ -51,12 +62,23 @@ app.get("/health", (_req: Request, res: Response) => {
 app.use(authMiddleware);
 
 // Recipe endpoints
+app.get("/recipes", listRecipesHandler);
+app.get("/recipes/:id", getRecipeHandler);
 app.post("/recipes/validate", validateRecipeHandler);
 app.post("/recipes", createRecipeHandler);
 
 // Job endpoints
-app.post("/jobs", createJobHandler);
+app.get("/jobs", listJobsHandler);
 app.get("/jobs/:id", getJobStatusHandler);
+app.post("/jobs", createJobHandler);
+
+// Artifact endpoints
+app.get("/artifacts", listArtifactsHandler);
+app.get("/artifacts/:id", getArtifactHandler);
+
+// Output endpoints
+app.get("/outputs", listOutputsHandler);
+app.get("/outputs/:id", getOutputHandler);
 
 // Error handling middleware
 app.use(
