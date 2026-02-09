@@ -13,7 +13,8 @@ export const createJobHandler = async (
     // Validate that either recipe_id or recipe is provided
     if (!body.recipe_id && !body.recipe) {
       res.status(400).json({
-        error: "Either recipe_id or recipe (name, version, definition) must be provided",
+        error:
+          "Either recipe_id or recipe (name, version, definition) must be provided",
       });
       return;
     }
@@ -24,7 +25,11 @@ export const createJobHandler = async (
     }
 
     if (body.recipe) {
-      if (!body.recipe.name || !body.recipe.version || !body.recipe.definition) {
+      if (
+        !body.recipe.name ||
+        !body.recipe.version ||
+        !body.recipe.definition
+      ) {
         res.status(400).json({
           error: "recipe must have name, version, and definition",
         });
@@ -32,7 +37,11 @@ export const createJobHandler = async (
       }
     }
 
-    if (!body.inputs || typeof body.inputs !== "object" || Array.isArray(body.inputs)) {
+    if (
+      !body.inputs ||
+      typeof body.inputs !== "object" ||
+      Array.isArray(body.inputs)
+    ) {
       res.status(400).json({ error: "inputs must be an object" });
       return;
     }
@@ -62,13 +71,37 @@ export const createJobHandler = async (
       }
 
       for (const [artifactName, output] of Object.entries(body.outputs)) {
-        if (
-          !output.path ||
-          typeof output.path !== "string"
-        ) {
+        if (!output.path || typeof output.path !== "string") {
           res.status(400).json({
             error: `Invalid output "${artifactName}": must have path as a string`,
           });
+          return;
+        }
+      }
+    }
+
+    // Validate params structure if provided (step_id -> param name -> value)
+    if (body.params !== undefined) {
+      if (
+        typeof body.params !== "object" ||
+        body.params === null ||
+        Array.isArray(body.params)
+      ) {
+        res.status(400).json({ error: "params must be an object" });
+        return;
+      }
+      for (const stepParams of Object.values(body.params)) {
+        if (
+          typeof stepParams !== "object" ||
+          stepParams === null ||
+          Array.isArray(stepParams)
+        ) {
+          res
+            .status(400)
+            .json({
+              error:
+                "params must map step IDs to objects (param name -> value)",
+            });
           return;
         }
       }
@@ -88,6 +121,7 @@ export const createJobHandler = async (
       }
       if (
         error.message.includes("Missing required") ||
+        error.message.includes("Missing required param") ||
         error.message.includes("Unexpected input") ||
         error.message.includes("must be provided")
       ) {

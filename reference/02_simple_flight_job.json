@@ -1,0 +1,39 @@
+{
+  "recipe": {
+    "name": "agisoft-flight-pipeline-tradmastarna",
+    "version": "1.0.0",
+    "definition": {
+      "recipe": [
+        {
+          "id": "agisoft",
+          "type": "PROCESS_AGISOFT",
+          "inputs": { "input_psx_zip": "input_psx_zip" },
+          "outputs": ["output_orthomosaic_tif", "output_point_cloud_las"]
+        },
+        {
+          "id": "publish_flight",
+          "type": "PUBLISH_FLIGHT_WMTS",
+          "required_params": ["workspace", "layer_name", "layer_title"],
+          "inputs": { "input_tif": "output_orthomosaic_tif" },
+          "outputs": ["output_flight_cog_tif"]
+        }
+      ]
+    }
+  },
+  "inputs": {
+    "input_psx_zip": {
+      "type": "zip",
+      "uri": "development/947_Sorfjarden_Vastra_Lilla.zip",
+      "hash": "xxx",
+      "metadata": {}
+    }
+  },
+  "params": {
+    "publish_flight": {
+      "workspace": "tradmastarna_cog",
+      "layer_name": "tradmastarna_cog",
+      "layer_title": "Tradmastarna Flights in COG"
+    }
+  },
+  "outputs": {}
+}

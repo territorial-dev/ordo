@@ -7,56 +7,14 @@
         {
           "id": "reproject",
           "type": "REPROJECT_LAS",
-          "params": {
-            "source_epsg": "EPSG:2271",
-            "target_epsg": "EPSG:3857"
-          },
-          "inputs": {
-            "input_las": "input_las"
-          },
+          "required_params": ["source_epsg", "target_epsg"],
+          "inputs": { "input_las": "input_las" },
           "outputs": ["output_las"]
-        },
-        {
-          "id": "dem",
-          "type": "GENERATE_DEM",
-          "params": {
-            "resolution": 1
-          },
-          "inputs": {
-            "input_las": "output_las"
-          },
-          "outputs": ["output_dem"]
-        },
-        {
-          "id": "hillshade",
-          "type": "GENERATE_HILLSHADE",
-          "params": {
-            "azimuth": 315,
-            "altitude": 45
-          },
-          "inputs": {
-            "input_dem": "output_dem"
-          },
-          "outputs": ["output_hillshade"]
-        },
-        {
-          "id": "contours",
-          "type": "GENERATE_CONTOURS",
-          "params": {
-            "interval": 1
-          },
-          "inputs": {
-            "input_dem": "output_dem"
-          },
-          "outputs": ["output_contours"]
         },
         {
           "id": "ept",
           "type": "BUILD_EPT",
-          "params": {},
-          "inputs": {
-            "input_las": "output_las"
-          },
+          "inputs": { "input_las": "output_las" },
           "outputs": ["output_ept"]
         }
       ]
@@ -70,18 +28,8 @@
       "metadata": {}
     }
   },
-  "outputs": {
-    "output_dem": {
-      "path": "final/piney-dam/dem.tif"
-    },
-    "output_hillshade": {
-      "path": "final/piney-dam/hillshade.tif"
-    },
-    "output_contours": {
-      "path": "final/piney-dam/contours.geojson"
-    },
-    "output_ept": {
-      "path": "final/piney-dam/ept"
-    }
-  }
+  "params": {
+    "reproject": { "source_epsg": "EPSG:2271", "target_epsg": "EPSG:3857" }
+  },
+  "outputs": { "output_ept": { "path": "final/piney-dam/ept" } }
 }

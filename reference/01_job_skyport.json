@@ -1,0 +1,69 @@
+{
+  "recipe": {
+    "name": "agisoft-flight-ctm-tth-pipeline-holmen",
+    "version": "1.0.0",
+    "definition": {
+      "recipe": [
+        {
+          "id": "agisoft",
+          "type": "PROCESS_AGISOFT",
+          "inputs": { "input_psx_zip": "input_psx_zip" },
+          "outputs": ["output_orthomosaic_tif", "output_point_cloud_las"]
+        },
+        {
+          "id": "process_point_cloud",
+          "type": "PROCESS_POINT_CLOUD",
+          "inputs": { "input_point_cloud": "output_point_cloud_las" },
+          "outputs": ["output_ctm_tif", "output_tth_shp"]
+        },
+        {
+          "id": "publish_flight",
+          "type": "PUBLISH_FLIGHT_WMTS",
+          "required_params": ["workspace", "layer_name", "layer_title"],
+          "inputs": { "input_tif": "output_orthomosaic_tif" },
+          "outputs": ["output_flight_cog_tif"]
+        },
+        {
+          "id": "publish_ctm",
+          "type": "PUBLISH_CTM_WMTS",
+          "required_params": ["workspace", "layer_name", "layer_title"],
+          "inputs": { "input_tif": "output_ctm_tif" },
+          "outputs": ["output_ctm_cog_tif"]
+        },
+        {
+          "id": "publish_tth",
+          "type": "PUBLISH_TTH_WMTS",
+          "required_params": ["workspace", "layer_name", "layer_title"],
+          "inputs": { "input_shp_zip": "output_tth_shp" },
+          "outputs": []
+        }
+      ]
+    }
+  },
+  "inputs": {
+    "input_psx_zip": {
+      "type": "zip",
+      "uri": "development/N_184_192.zip",
+      "hash": "xxxxx",
+      "metadata": {}
+    }
+  },
+  "params": {
+    "publish_flight": {
+      "workspace": "holmen",
+      "layer_name": "holmen_2025_f",
+      "layer_title": "Holmen 2025 Flight"
+    },
+    "publish_ctm": {
+      "workspace": "holmen",
+      "layer_name": "holmen_2025_ctm",
+      "layer_title": "Holmen 2025 Canopy Terrain Model"
+    },
+    "publish_tth": {
+      "workspace": "holmen",
+      "layer_name": "holmen_2025_t",
+      "layer_title": "Holmen 2025 Tree Top Height"
+    }
+  },
+  "outputs": {}
+}

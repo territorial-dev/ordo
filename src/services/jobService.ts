@@ -31,7 +31,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     // Find or create recipe by name and version
     let recipe = await getRecipeByNameAndVersion(
       req.recipe.name,
-      req.recipe.version
+      req.recipe.version,
     );
     if (!recipe) {
       // Create new recipe
@@ -45,7 +45,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     }
   } else {
     throw new Error(
-      "Either recipe_id or recipe (name, version, definition) must be provided"
+      "Either recipe_id or recipe (name, version, definition) must be provided",
     );
   }
 
@@ -80,7 +80,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
   for (const requiredInput of initialInputs) {
     if (!req.inputs[requiredInput]) {
       throw new Error(
-        `Missing required initial input artifact: ${requiredInput}`
+        `Missing required initial input artifact: ${requiredInput}`,
       );
     }
   }
@@ -91,8 +91,8 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     if (!initialInputs.has(providedInput)) {
       throw new Error(
         `Unexpected input artifact "${providedInput}": not required by recipe. Required inputs: ${Array.from(
-          initialInputs
-        ).join(", ")}`
+          initialInputs,
+        ).join(", ")}`,
       );
     }
   }
@@ -104,8 +104,25 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
       if (!allOutputs.has(artifactName)) {
         throw new Error(
           `Invalid job output "${artifactName}": artifact is not producible by recipe. Producible artifacts: ${Array.from(
-            allOutputs
-          ).join(", ")}`
+            allOutputs,
+          ).join(", ")}`,
+        );
+      }
+    }
+  }
+
+  // Validate job params: for each step with required_params, required keys must be present
+  const jobParams = req.params ?? {};
+  for (const step of recipeSteps) {
+    const requiredKeys = step.required_params ?? [];
+    if (requiredKeys.length === 0) {
+      continue;
+    }
+    const provided = jobParams[step.id];
+    for (const paramName of requiredKeys) {
+      if (provided === undefined || !(paramName in provided)) {
+        throw new Error(
+          `Missing required param "${paramName}" for step "${step.id}"`,
         );
       }
     }
@@ -117,11 +134,12 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     await client.query("BEGIN");
 
     // Create job
+    const jobParamsJson = JSON.stringify(jobParams);
     const jobResult = await client.query(
-      `INSERT INTO ${schema}.job (recipe_id, status)
-       VALUES ($1, 'pending')
+      `INSERT INTO ${schema}.job (recipe_id, status, params)
+       VALUES ($1, 'pending', $2::jsonb)
        RETURNING id`,
-      [recipeId]
+      [recipeId, jobParamsJson],
     );
     const jobId = jobResult.rows[0].id;
 
@@ -139,7 +157,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
           artifact.uri,
           artifact.hash,
           artifact.metadata ? JSON.stringify(artifact.metadata) : null,
-        ]
+        ],
       );
     }
 
@@ -149,7 +167,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
         `INSERT INTO ${schema}.job_step
          (job_id, step_id, step_type, status, attempt)
          VALUES ($1, $2, $3, 'pending', 0)`,
-        [jobId, step.id, step.type]
+        [jobId, step.id, step.type],
       );
     }
 
@@ -159,7 +177,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
         await client.query(
           `INSERT INTO ${schema}.job_output (job_id, artifact_name, path)
            VALUES ($1, $2, $3)`,
-          [jobId, artifactName, output.path]
+          [jobId, artifactName, output.path],
         );
       }
     }
@@ -172,7 +190,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
   } finally {
     client.release();
   }
-};
+};;
 
 export const getJobStatus = async (
   jobId: number
@@ -182,10 +200,10 @@ export const getJobStatus = async (
 
   // Get job
   const jobResult = await pool.query(
-    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params
      FROM ${schema}.job
      WHERE id = $1`,
-    [jobId]
+    [jobId],
   );
 
   if (jobResult.rows.length === 0) {
@@ -201,6 +219,7 @@ export const getJobStatus = async (
     started_at: jobRow.started_at,
     finished_at: jobRow.finished_at,
     error: jobRow.error,
+    params: jobRow.params ?? {},
   };
 
   // Get steps

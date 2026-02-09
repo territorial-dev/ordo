@@ -170,7 +170,7 @@ const validateStep = (step: StepDefinition): void => {
     Array.isArray(step.inputs)
   ) {
     throw new ValidationError(
-      'Step must have an "inputs" object (slot -> artifact mapping)'
+      'Step must have an "inputs" object (slot -> artifact mapping)',
     );
   }
 
@@ -182,7 +182,7 @@ const validateStep = (step: StepDefinition): void => {
   for (const [slot, artifact] of Object.entries(step.inputs)) {
     if (typeof slot !== "string" || typeof artifact !== "string") {
       throw new ValidationError(
-        `Step "${step.id}" inputs must be a mapping of slot names (strings) to artifact names (strings)`
+        `Step "${step.id}" inputs must be a mapping of slot names (strings) to artifact names (strings)`,
       );
     }
   }
@@ -191,10 +191,28 @@ const validateStep = (step: StepDefinition): void => {
     throw new ValidationError("Step outputs must be strings");
   }
 
-  if (typeof step.params !== "object" || step.params === null) {
-    throw new ValidationError('Step must have a "params" object');
+  // Parameter values are not part of recipe identity and do not affect recipe versioning.
+  // Steps declare required params only via required_params; concrete values are provided at job creation.
+  if ("params" in step && step.params !== undefined) {
+    throw new ValidationError(
+      'Step must not contain "params" (concrete values). Use "required_params" (array of param names) to declare required parameters.',
+    );
   }
-};
+  if (step.required_params !== undefined) {
+    if (!Array.isArray(step.required_params)) {
+      throw new ValidationError(
+        'Step "required_params" must be an array of strings',
+      );
+    }
+    for (const p of step.required_params) {
+      if (typeof p !== "string") {
+        throw new ValidationError(
+          'Step "required_params" must contain only strings',
+        );
+      }
+    }
+  }
+};;
 
 const validateInputsMatchAccepts = (
   step: StepDefinition,

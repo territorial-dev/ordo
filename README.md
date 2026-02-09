@@ -195,6 +195,7 @@ Create a job from a recipe.
 - `recipe` (optional): Recipe definition (name, version, definition) - used if `recipe_id` is not provided
 - `inputs` (required): Object mapping artifact names to artifact metadata (type, uri, hash, optional metadata)
 - `outputs` (optional): Object mapping artifact names to final destination paths. All artifact names must be producible by the recipe DAG.
+- `params` (optional): Object mapping step IDs to param objects (param name → value). Supplies concrete parameter values for steps that declare `required_params` in the recipe. Parameter values are not part of recipe identity and do not affect recipe versioning.
 
 **Response:**
 
@@ -226,7 +227,8 @@ Get job status, steps, and artifacts.
     "created_at": "2024-01-01T00:00:00Z",
     "started_at": null,
     "finished_at": null,
-    "error": null
+    "error": null,
+    "params": {}
   },
   "steps": [...],
   "artifacts": [...]
@@ -263,6 +265,10 @@ This means: "Bind artifact `output_las` to executor slot `input_las`". The key i
 
 Validation happens automatically when creating a recipe via `POST /recipes`, and can be tested independently using `POST /recipes/validate`. Invalid recipes are rejected early with clear, actionable error messages.
 
+**Recipe vs job:** Recipes define pipeline structure (steps, inputs, outputs, and which parameters each step requires via `required_params`). Jobs supply concrete values at creation time: initial artifacts, optional outputs, and per-step parameter values in `params`. Parameter values are not part of recipe identity and do not affect recipe versioning.
+
+**Upgrading existing recipes:** If you have recipes stored with the old shape (steps with `params` objects containing concrete values), run the one-off migration script once: `npx ts-node scripts/migrate-recipe-params.ts`. It rewrites each step's `params` to `required_params` (array of param names) so the new validation and job-level params work correctly.
+
 ## Example Pipeline
 
 The following example demonstrates a complete pipeline for processing LiDAR data:
@@ -277,10 +283,7 @@ The following example demonstrates a complete pipeline for processing LiDAR data
         {
           "id": "reproject",
           "type": "REPROJECT_LAS",
-          "params": {
-            "source_epsg": "EPSG:2271",
-            "target_epsg": "EPSG:3857"
-          },
+          "required_params": ["source_epsg", "target_epsg"],
           "inputs": {
             "input_las": "input_las"
           },
@@ -289,9 +292,7 @@ The following example demonstrates a complete pipeline for processing LiDAR data
         {
           "id": "dem",
           "type": "GENERATE_DEM",
-          "params": {
-            "resolution": 1
-          },
+          "required_params": ["resolution"],
           "inputs": {
             "input_las": "output_las"
           },
@@ -300,10 +301,7 @@ The following example demonstrates a complete pipeline for processing LiDAR data
         {
           "id": "hillshade",
           "type": "GENERATE_HILLSHADE",
-          "params": {
-            "azimuth": 315,
-            "altitude": 45
-          },
+          "required_params": ["azimuth", "altitude"],
           "inputs": {
             "input_dem": "output_dem"
           },
@@ -312,9 +310,7 @@ The following example demonstrates a complete pipeline for processing LiDAR data
         {
           "id": "contours",
           "type": "GENERATE_CONTOURS",
-          "params": {
-            "interval": 1
-          },
+          "required_params": ["interval"],
           "inputs": {
             "input_dem": "output_dem"
           },
@@ -323,7 +319,6 @@ The following example demonstrates a complete pipeline for processing LiDAR data
         {
           "id": "ept",
           "type": "BUILD_EPT",
-          "params": {},
           "inputs": {
             "input_las": "output_las"
           },
@@ -331,6 +326,12 @@ The following example demonstrates a complete pipeline for processing LiDAR data
         }
       ]
     }
+  },
+  "params": {
+    "reproject": { "source_epsg": "EPSG:2271", "target_epsg": "EPSG:3857" },
+    "dem": { "resolution": 1 },
+    "hillshade": { "azimuth": 315, "altitude": 45 },
+    "contours": { "interval": 1 }
   }
 }
 ```

@@ -3,7 +3,8 @@ export interface StepDefinition {
   type: string;
   inputs: Record<string, string>; // slot name -> artifact name
   outputs: string[];
-  params: Record<string, any>;
+  /** Declaration of required params only; optional. If absent, step has no required params. */
+  required_params?: string[];
 }
 
 export interface RecipeDefinition {
@@ -26,6 +27,7 @@ export interface Job {
   started_at: Date | null;
   finished_at: Date | null;
   error: string | null;
+  params?: Record<string, Record<string, any>>; // step_id -> param name -> value
 }
 
 export interface JobStep {
@@ -87,6 +89,8 @@ export interface CreateJobRequest {
       path: string;
     }
   >;
+  /** Optional. Keys are step IDs, values are param name -> value for that step. */
+  params?: Record<string, Record<string, any>>;
 }
 
 export interface JobStatusResponse {

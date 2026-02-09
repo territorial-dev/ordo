@@ -7,59 +7,36 @@
         {
           "id": "reproject",
           "type": "REPROJECT_LAS",
-          "params": {
-            "source_epsg": "X",
-            "target_epsg": "Y"
-          },
-          "inputs": {
-            "input_las": "input_las"
-          },
+          "required_params": ["source_epsg", "target_epsg"],
+          "inputs": { "input_las": "input_las" },
           "outputs": ["output_las"]
         },
         {
           "id": "dem",
           "type": "GENERATE_DEM",
-          "params": {
-            "resolution": 1.0,
-            "method": "tin"
-          },
-          "inputs": {
-            "input_las": "output_las"
-          },
+          "required_params": ["resolution", "method"],
+          "inputs": { "input_las": "output_las" },
           "outputs": ["output_dem"]
         },
         {
           "id": "hillshade",
           "type": "GENERATE_HILLSHADE",
-          "params": {
-            "azimuth": 315,
-            "altitude": 45
-          },
-          "inputs": {
-            "input_dem": "output_dem"
-          },
+          "required_params": ["azimuth", "altitude"],
+          "inputs": { "input_dem": "output_dem" },
           "outputs": ["output_hillshade"]
         },
         {
           "id": "contours",
           "type": "GENERATE_CONTOURS",
-          "params": {
-            "interval": 1.0
-          },
-          "inputs": {
-            "input_dem": "output_dem"
-          },
+          "required_params": ["interval"],
+          "inputs": { "input_dem": "output_dem" },
           "outputs": ["output_contours"]
         },
         {
           "id": "ept",
           "type": "BUILD_EPT",
-          "params": {
-            "resolution": "auto"
-          },
-          "inputs": {
-            "input_las": "output_las"
-          },
+          "required_params": ["resolution"],
+          "inputs": { "input_las": "output_las" },
           "outputs": ["output_ept"]
         }
       ]
@@ -73,18 +50,17 @@
       "metadata": {}
     }
   },
+  "params": {
+    "reproject": { "source_epsg": "X", "target_epsg": "Y" },
+    "dem": { "resolution": 1, "method": "tin" },
+    "hillshade": { "azimuth": 315, "altitude": 45 },
+    "contours": { "interval": 1 },
+    "ept": { "resolution": "auto" }
+  },
   "outputs": {
-    "output_dem": {
-      "path": "final/dem.tif"
-    },
-    "output_hillshade": {
-      "path": "final/hillshade.tif"
-    },
-    "output_contours": {
-      "path": "final/contours.geojson"
-    },
-    "output_ept": {
-      "path": "final/ept"
-    }
+    "output_dem": { "path": "final/dem.tif" },
+    "output_hillshade": { "path": "final/hillshade.tif" },
+    "output_contours": { "path": "final/contours.geojson" },
+    "output_ept": { "path": "final/ept" }
   }
 }
