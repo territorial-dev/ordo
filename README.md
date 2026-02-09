@@ -182,6 +182,9 @@ Create a job from a recipe.
       "metadata": {}
     }
   },
+  "params": {
+    "step_id": { "param_name": "value" }
+  },
   "outputs": {
     "output_artifact": {
       "path": "final/storage/path"
@@ -189,6 +192,8 @@ Create a job from a recipe.
   }
 }
 ```
+
+(`params` is optional; keys are step IDs, values are param name → value for that step.)
 
 **Request Fields:**
 - `recipe_id` (optional): ID of an existing recipe
@@ -244,6 +249,7 @@ Health check endpoint (no authentication required).
 Recipes are validated against `step_executor` contracts before they can be stored. The validation ensures that:
 
 - **Step types exist**: Every step type must exist in the `{schema}.step_executor` table
+- **Step parameters**: Steps must not contain `params` (concrete values). Steps may declare required parameter names via optional `required_params` (array of strings). Steps with no required params can omit `required_params`.
 - **Input slot binding**: All input slots must exactly match the keys defined in `step_executor.accepts` (no missing, no extra). Each slot must be bound to an artifact name.
 - **Outputs match executor contracts**: All outputs must exactly match the keys defined in `step_executor.produces` (no renamed, no additional)
 - **Artifact flow is valid**: All referenced artifact names must be available (either from external inputs or produced by previous steps)
