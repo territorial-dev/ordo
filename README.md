@@ -47,6 +47,11 @@ Over time, I expect Ordo to evolve toward:
 
 Those are natural extensions, not prerequisites.
 
+## Documentation
+
+- [Pipeline Authoring Guide](PIPELINE-AUTHORING.md) — how to define pipelines, register executors, and create jobs
+- [Using Ordo with n8n](USING_WITH_N8N.md) — execution engine setup and worker configuration
+
 ## Setup
 
 1. Install dependencies:
