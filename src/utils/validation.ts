@@ -1,4 +1,4 @@
-import { RecipeDefinition, StepDefinition, StepDefinitionV2, StepExecutor } from "../types";
+import { RecipeDefinition, StepDefinition, StepExecutor } from "../types";
 import { getStepExecutors } from "../services/stepExecutorService";
 
 export class ValidationError extends Error {
@@ -8,48 +8,157 @@ export class ValidationError extends Error {
   }
 }
 
-// -- v2 schema helpers --------------------------------------------------------
-
-/** Returns true when a step uses the new schema (outputs is a Record, not an array). */
-export const isNewSchemaStep = (step: unknown): step is StepDefinitionV2 => {
-  if (step === null || typeof step !== "object") return false;
-  const s = step as Record<string, unknown>;
-  return (
-    "outputs" in s &&
-    !Array.isArray(s.outputs) &&
-    typeof s.outputs === "object" &&
-    s.outputs !== null
-  );
-};
-
 /**
  * Returns true when ref is a valid namespaced artifact reference:
- *   job:<name>           – a top-level job artifact
- *   step:<stepId>.<slot> – the output slot of a specific step
+ *   job:<name>           – a job-level input artifact
+ *   step:<stepId>.<slot> – an artifact produced by a specific step's output slot
  */
-const NAMESPACED_REF_RE =
-  /^(job:[A-Za-z0-9_-]+|step:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/;
-
 export const isNamespacedRef = (ref: string): boolean =>
-  NAMESPACED_REF_RE.test(ref);
+  /^(job:[A-Za-z0-9_-]+|step:[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.test(ref);
 
-/** Normalises step outputs to a flat list of artifact names for flow analysis. */
-const getOutputArtifactNames = (
-  step: StepDefinition | StepDefinitionV2
-): string[] => {
-  if (Array.isArray(step.outputs)) {
-    return step.outputs as string[];
+export const validateRecipe = async (
+  definition: RecipeDefinition,
+  externalInputs: Set<string> = new Set()
+): Promise<void> => {
+  if (!definition.recipe || !Array.isArray(definition.recipe)) {
+    throw new ValidationError(
+      'Recipe definition must contain a "recipe" array'
+    );
   }
-  return Object.values(step.outputs as Record<string, string>);
+
+  if (definition.recipe.length === 0) {
+    throw new ValidationError("Recipe must contain at least one step");
+  }
+
+  const stepIds = new Set<string>();
+  const outputArtifacts = new Map<string, string>(); // artifact name -> step id
+
+  // First pass: structural validation and duplicate checks
+  for (const step of definition.recipe) {
+    validateStep(step);
+
+    if (stepIds.has(step.id)) {
+      throw new ValidationError(`Duplicate step ID: ${step.id}`);
+    }
+    stepIds.add(step.id);
+
+    for (const artifactName of Object.values(step.outputs)) {
+      if (outputArtifacts.has(artifactName)) {
+        const producerStepId = outputArtifacts.get(artifactName)!;
+        throw new ValidationError(
+          `Duplicate output artifact "${artifactName}": produced by both step "${producerStepId}" and step "${step.id}". Each artifact name must be unique.`
+        );
+      }
+      outputArtifacts.set(artifactName, step.id);
+    }
+  }
+
+  // Collect all unique step types and batch-fetch executors
+  const stepTypes = Array.from(new Set(definition.recipe.map((s) => s.type)));
+  const executorMap = await getStepExecutors(stepTypes);
+
+  // Rule 1: Step type must exist in step_executor
+  for (const step of definition.recipe) {
+    if (!executorMap.get(step.type)) {
+      throw new ValidationError(`Unsupported step type: ${step.type}`);
+    }
+  }
+
+  // Identify initial inputs: artifact names referenced in inputs but produced by no step
+  const allOutputArtifacts = new Set<string>();
+  for (const step of definition.recipe) {
+    for (const artifactName of Object.values(step.outputs)) {
+      allOutputArtifacts.add(artifactName);
+    }
+  }
+
+  const initialInputs = new Set<string>();
+  for (const step of definition.recipe) {
+    for (const artifactName of Object.values(step.inputs)) {
+      if (!allOutputArtifacts.has(artifactName)) {
+        initialInputs.add(artifactName);
+      }
+    }
+  }
+
+  const availableArtifacts = new Set<string>([
+    ...externalInputs,
+    ...initialInputs,
+  ]);
+
+  // Topological sort, then validate each step in dependency order
+  const sortedSteps = topologicalSort(definition.recipe);
+
+  for (const step of sortedSteps) {
+    const executor = executorMap.get(step.type)!;
+
+    // Rule 2: Input slots must match executor accepts exactly
+    validateInputsMatchAccepts(step, executor);
+
+    // Rule 3: Output slots must match executor produces exactly
+    validateOutputsMatchProduces(step, executor);
+
+    // Rule 4: All referenced input artifacts must be available
+    for (const artifactName of Object.values(step.inputs)) {
+      if (!availableArtifacts.has(artifactName)) {
+        throw new ValidationError(`Unresolved input artifact: ${artifactName}`);
+      }
+    }
+
+    for (const artifactName of Object.values(step.outputs)) {
+      availableArtifacts.add(artifactName);
+    }
+  }
+
+  // Cycle detection (redundant with topo sort but kept as a safety net)
+  const visited = new Set<string>();
+  const hasCycle = (stepId: string, recStack: Set<string>): boolean => {
+    if (recStack.has(stepId)) return true;
+    if (visited.has(stepId)) return false;
+
+    visited.add(stepId);
+    recStack.add(stepId);
+
+    const step = definition.recipe.find((s) => s.id === stepId);
+    if (step) {
+      for (const artifactName of Object.values(step.inputs)) {
+        const producerStep = findProducerStep(artifactName, definition.recipe);
+        if (producerStep && hasCycle(producerStep.id, recStack)) return true;
+      }
+    }
+
+    recStack.delete(stepId);
+    return false;
+  };
+
+  for (const step of definition.recipe) {
+    if (!visited.has(step.id)) {
+      if (hasCycle(step.id, new Set<string>())) {
+        throw new ValidationError("Recipe contains a cycle");
+      }
+    }
+  }
 };
 
-const validateStepV2 = (step: StepDefinitionV2): void => {
+const validateStep = (step: StepDefinition): void => {
+  // Detect legacy array outputs and give a clear migration error
+  if (Array.isArray((step as any).outputs)) {
+    const stepId = step.id ?? "(unknown)";
+    throw new ValidationError(
+      `Step "${stepId}" uses the legacy array outputs format. ` +
+      `Migrate to a typed map: "outputs": { "slot_name": "step:${stepId}.slot_name" }. ` +
+      `Each key is an executor output slot; each value is the artifact name for that slot.`
+    );
+  }
+
   if (!step.id || typeof step.id !== "string") {
     throw new ValidationError('Step must have a string "id"');
   }
+
   if (!step.type || typeof step.type !== "string") {
     throw new ValidationError('Step must have a string "type"');
   }
+
   if (
     typeof step.inputs !== "object" ||
     step.inputs === null ||
@@ -59,45 +168,66 @@ const validateStepV2 = (step: StepDefinitionV2): void => {
       'Step must have an "inputs" object (slot -> artifact mapping)'
     );
   }
+
   if (
     typeof step.outputs !== "object" ||
     step.outputs === null ||
     Array.isArray(step.outputs)
   ) {
     throw new ValidationError(
-      `Step "${step.id}" outputs must be a map of slot names to artifact names (Record<string, string>)`
+      `Step "${step.id}" outputs must be a map of slot names to artifact names: ` +
+      `"outputs": { "slot_name": "step:${step.id}.slot_name" }`
     );
   }
-  // Validate inputs entries
+
+  // Detect legacy required_params
+  if ("required_params" in step && (step as any).required_params !== undefined) {
+    throw new ValidationError(
+      `Step "${step.id}" uses deprecated "required_params". ` +
+      `Rename it to "param_keys". No other changes are needed for this field.`
+    );
+  }
+
+  // Forbid concrete params inside the recipe
+  if ("params" in step && (step as any).params !== undefined) {
+    throw new ValidationError(
+      `Step "${step.id}" must not contain "params" (concrete values). ` +
+      `Use "param_keys" to declare required parameter names; supply concrete values at job creation.`
+    );
+  }
+
+  // Validate inputs: slot and artifact names, and namespaced refs
   for (const [slot, artifact] of Object.entries(step.inputs)) {
     if (typeof slot !== "string" || typeof artifact !== "string") {
       throw new ValidationError(
         `Step "${step.id}" inputs must map slot names (strings) to artifact names (strings)`
       );
     }
-  }
-  // Validate outputs entries
-  for (const [slot, artifact] of Object.entries(
-    step.outputs as Record<string, string>
-  )) {
-    if (typeof slot !== "string") {
+    if (!isNamespacedRef(artifact)) {
       throw new ValidationError(
-        `Step "${step.id}" output slot names must be strings`
-      );
-    }
-    if (typeof artifact !== "string") {
-      throw new ValidationError(
-        `Step "${step.id}" output artifact names must be strings (slot "${slot}")`
+        `Step "${step.id}" input slot "${slot}" has unqualified artifact reference "${artifact}". ` +
+        `Use "job:<name>" for job-level inputs or "step:<stepId>.<slot>" for step outputs. ` +
+        `Example: "job:${artifact}" or "step:<producer_step_id>.${slot}"`
       );
     }
   }
-  // Forbid concrete params
-  if ("params" in step && (step as any).params !== undefined) {
-    throw new ValidationError(
-      'Step must not contain "params" (concrete values). Use "param_keys" to declare required parameters.'
-    );
+
+  // Validate outputs: slot and artifact names, and namespaced refs
+  for (const [slot, artifact] of Object.entries(step.outputs)) {
+    if (typeof slot !== "string" || typeof artifact !== "string") {
+      throw new ValidationError(
+        `Step "${step.id}" outputs must map slot names (strings) to artifact names (strings)`
+      );
+    }
+    if (!isNamespacedRef(artifact)) {
+      throw new ValidationError(
+        `Step "${step.id}" output slot "${slot}" has unqualified artifact name "${artifact}". ` +
+        `Use the "step:<stepId>.<slot>" format: "step:${step.id}.${slot}"`
+      );
+    }
   }
-  // param_keys: must be an array of unique strings if present
+
+  // Validate param_keys: must be an array of unique strings
   if (step.param_keys !== undefined) {
     if (!Array.isArray(step.param_keys)) {
       throw new ValidationError(
@@ -121,236 +251,13 @@ const validateStepV2 = (step: StepDefinitionV2): void => {
   }
 };
 
-// -- main validate function ---------------------------------------------------
-
-export const validateRecipe = async (
-  definition: RecipeDefinition,
-  externalInputs: Set<string> = new Set()
-): Promise<void> => {
-  // Structural validation
-  if (!definition.recipe || !Array.isArray(definition.recipe)) {
-    throw new ValidationError(
-      'Recipe definition must contain a "recipe" array'
-    );
-  }
-
-  if (definition.recipe.length === 0) {
-    throw new ValidationError("Recipe must contain at least one step");
-  }
-
-  const stepIds = new Set<string>();
-  const outputArtifacts = new Map<string, string>(); // artifact name -> step id
-
-  // First pass: structural validation and collect step types
-  for (const step of definition.recipe) {
-    const anyStep = step as StepDefinition | StepDefinitionV2;
-    if (isNewSchemaStep(anyStep)) {
-      validateStepV2(anyStep);
-    } else {
-      validateStep(step);
-    }
-
-    if (stepIds.has(step.id)) {
-      throw new ValidationError(`Duplicate step ID: ${step.id}`);
-    }
-    stepIds.add(step.id);
-
-    // Check for duplicate output artifacts
-    for (const output of getOutputArtifactNames(anyStep)) {
-      if (outputArtifacts.has(output)) {
-        const producerStepId = outputArtifacts.get(output)!;
-        throw new ValidationError(
-          `Duplicate output artifact "${output}": produced by both step "${producerStepId}" and step "${step.id}". Each artifact name must be unique.`
-        );
-      }
-      outputArtifacts.set(output, step.id);
-    }
-  }
-
-  // Collect all unique step types
-  const stepTypes = Array.from(new Set(definition.recipe.map((s) => s.type)));
-
-  // Query all step executors in one batch
-  const executorMap = await getStepExecutors(stepTypes);
-
-  // Rule 1: Step type must exist in step_executor
-  for (const step of definition.recipe) {
-    const executor = executorMap.get(step.type);
-    if (!executor) {
-      throw new ValidationError(`Unsupported step type: ${step.type}`);
-    }
-  }
-
-  // Identify initial inputs (artifact names not produced by any step)
-  // These are external inputs that will be provided at job creation
-  const allOutputs = new Set<string>();
-  for (const step of definition.recipe) {
-    for (const output of getOutputArtifactNames(step as StepDefinition | StepDefinitionV2)) {
-      allOutputs.add(output);
-    }
-  }
-
-  // Collect all artifact names referenced in inputs
-  const allArtifactNames = new Set<string>();
-  for (const step of definition.recipe) {
-    for (const artifactName of Object.values(step.inputs)) {
-      allArtifactNames.add(artifactName);
-    }
-  }
-
-  // Initial inputs are artifact names that are referenced but not produced by any step
-  const initialInputs = new Set<string>();
-  for (const artifactName of allArtifactNames) {
-    if (!allOutputs.has(artifactName)) {
-      initialInputs.add(artifactName);
-    }
-  }
-
-  // Merge provided external inputs with identified initial inputs
-  // (externalInputs parameter allows job creation to specify which inputs are provided)
-  const availableArtifacts = new Set<string>([
-    ...externalInputs,
-    ...initialInputs,
-  ]);
-
-  // Topological sort to validate in dependency order
-  const sortedSteps = topologicalSort(
-    definition.recipe as Array<StepDefinition | StepDefinitionV2>
-  );
-
-  // Validate each step in dependency order
-  for (const step of sortedSteps) {
-    const executor = executorMap.get(step.type)!;
-
-    // Rule 2: Inputs must match executor accepts (slot binding validation)
-    validateInputsMatchAccepts(step, executor);
-
-    // Rule 3: Outputs must match executor produces
-    if (isNewSchemaStep(step)) {
-      validateOutputsMatchProducesV2(step, executor);
-    } else {
-      validateOutputsMatchProduces(step as StepDefinition, executor);
-    }
-
-    // Rule 4: Artifact flow validation - all referenced artifacts must be available
-    for (const artifactName of Object.values(step.inputs)) {
-      if (!availableArtifacts.has(artifactName)) {
-        throw new ValidationError(`Unresolved input artifact: ${artifactName}`);
-      }
-    }
-
-    // Add outputs to available artifacts after validation
-    for (const output of getOutputArtifactNames(step)) {
-      availableArtifacts.add(output);
-    }
-  }
-
-  // Check for cycles (additional safety check)
-  const visited = new Set<string>();
-  const hasCycle = (stepId: string, recStack: Set<string>): boolean => {
-    if (recStack.has(stepId)) {
-      return true;
-    }
-    if (visited.has(stepId)) {
-      return false;
-    }
-
-    visited.add(stepId);
-    recStack.add(stepId);
-
-    const step = definition.recipe.find((s) => s.id === stepId);
-    if (step) {
-      for (const artifactName of Object.values(step.inputs)) {
-        const producerStep = findProducerStep(
-          artifactName,
-          definition.recipe as Array<StepDefinition | StepDefinitionV2>
-        );
-        if (producerStep && hasCycle(producerStep.id, recStack)) {
-          return true;
-        }
-      }
-    }
-
-    recStack.delete(stepId);
-    return false;
-  };
-
-  for (const step of definition.recipe) {
-    if (!visited.has(step.id)) {
-      if (hasCycle(step.id, new Set<string>())) {
-        throw new ValidationError("Recipe contains a cycle");
-      }
-    }
-  }
-};
-
-const validateStep = (step: StepDefinition): void => {
-  if (!step.id || typeof step.id !== "string") {
-    throw new ValidationError('Step must have a string "id"');
-  }
-
-  if (!step.type || typeof step.type !== "string") {
-    throw new ValidationError('Step must have a string "type"');
-  }
-
-  if (
-    typeof step.inputs !== "object" ||
-    step.inputs === null ||
-    Array.isArray(step.inputs)
-  ) {
-    throw new ValidationError(
-      'Step must have an "inputs" object (slot -> artifact mapping)',
-    );
-  }
-
-  if (!Array.isArray(step.outputs)) {
-    throw new ValidationError('Step must have an "outputs" array');
-  }
-
-  // Validate inputs object structure
-  for (const [slot, artifact] of Object.entries(step.inputs)) {
-    if (typeof slot !== "string" || typeof artifact !== "string") {
-      throw new ValidationError(
-        `Step "${step.id}" inputs must be a mapping of slot names (strings) to artifact names (strings)`,
-      );
-    }
-  }
-
-  if (step.outputs.some((o) => typeof o !== "string")) {
-    throw new ValidationError("Step outputs must be strings");
-  }
-
-  // Parameter values are not part of recipe identity and do not affect recipe versioning.
-  // Steps declare required params only via required_params; concrete values are provided at job creation.
-  if ("params" in step && step.params !== undefined) {
-    throw new ValidationError(
-      'Step must not contain "params" (concrete values). Use "required_params" (array of param names) to declare required parameters.',
-    );
-  }
-  if (step.required_params !== undefined) {
-    if (!Array.isArray(step.required_params)) {
-      throw new ValidationError(
-        'Step "required_params" must be an array of strings',
-      );
-    }
-    for (const p of step.required_params) {
-      if (typeof p !== "string") {
-        throw new ValidationError(
-          'Step "required_params" must contain only strings',
-        );
-      }
-    }
-  }
-};;
-
 const validateInputsMatchAccepts = (
-  step: StepDefinition | StepDefinitionV2,
+  step: StepDefinition,
   executor: StepExecutor
 ): void => {
   const acceptsKeys = new Set(Object.keys(executor.accepts));
   const stepInputSlots = new Set(Object.keys(step.inputs));
 
-  // Check for missing inputs (executor requires but step doesn't bind)
   for (const requiredSlot of acceptsKeys) {
     if (!stepInputSlots.has(requiredSlot)) {
       throw new ValidationError(
@@ -359,15 +266,11 @@ const validateInputsMatchAccepts = (
     }
   }
 
-  // Check for extra inputs (step binds but executor doesn't accept)
   for (const providedSlot of stepInputSlots) {
     if (!acceptsKeys.has(providedSlot)) {
       throw new ValidationError(
-        `Step "${
-          step.id
-        }" has invalid input slot: ${providedSlot}. Accepted slots: ${Array.from(
-          acceptsKeys
-        ).join(", ")}`
+        `Step "${step.id}" has invalid input slot: ${providedSlot}. ` +
+        `Accepted slots: ${Array.from(acceptsKeys).join(", ")}`
       );
     }
   }
@@ -378,39 +281,8 @@ const validateOutputsMatchProduces = (
   executor: StepExecutor
 ): void => {
   const producesKeys = new Set(Object.keys(executor.produces));
-  const stepOutputs = new Set(step.outputs);
-
-  // Check for missing outputs (executor produces but step doesn't declare)
-  for (const requiredOutput of producesKeys) {
-    if (!stepOutputs.has(requiredOutput)) {
-      throw new ValidationError(
-        `Step "${step.id}" missing required output: ${requiredOutput}`
-      );
-    }
-  }
-
-  // Check for extra outputs (step declares but executor doesn't produce)
-  for (const declaredOutput of stepOutputs) {
-    if (!producesKeys.has(declaredOutput)) {
-      throw new ValidationError(
-        `Step "${
-          step.id
-        }" has invalid output: ${declaredOutput}. Produced outputs: ${Array.from(
-          producesKeys
-        ).join(", ")}`
-      );
-    }
-  }
-};
-
-const validateOutputsMatchProducesV2 = (
-  step: StepDefinitionV2,
-  executor: StepExecutor
-): void => {
-  const producesKeys = new Set(Object.keys(executor.produces));
   const stepOutputSlots = new Set(Object.keys(step.outputs));
 
-  // Check for missing output slots (executor produces but step doesn't map)
   for (const requiredSlot of producesKeys) {
     if (!stepOutputSlots.has(requiredSlot)) {
       throw new ValidationError(
@@ -419,43 +291,32 @@ const validateOutputsMatchProducesV2 = (
     }
   }
 
-  // Check for extra output slots (step maps but executor doesn't produce)
   for (const declaredSlot of stepOutputSlots) {
     if (!producesKeys.has(declaredSlot)) {
       throw new ValidationError(
-        `Step "${
-          step.id
-        }" has invalid output slot: ${declaredSlot}. Produced slots: ${Array.from(
-          producesKeys
-        ).join(", ")}`
+        `Step "${step.id}" has invalid output slot: ${declaredSlot}. ` +
+        `Produced slots: ${Array.from(producesKeys).join(", ")}`
       );
     }
   }
 };
 
-const topologicalSort = (
-  steps: Array<StepDefinition | StepDefinitionV2>
-): Array<StepDefinition | StepDefinitionV2> => {
-  const sorted: Array<StepDefinition | StepDefinitionV2> = [];
+const topologicalSort = (steps: StepDefinition[]): StepDefinition[] => {
+  const sorted: StepDefinition[] = [];
   const visited = new Set<string>();
   const visiting = new Set<string>();
 
-  const visit = (step: StepDefinition | StepDefinitionV2): void => {
+  const visit = (step: StepDefinition): void => {
     if (visiting.has(step.id)) {
       throw new ValidationError("Recipe contains a cycle");
     }
-    if (visited.has(step.id)) {
-      return;
-    }
+    if (visited.has(step.id)) return;
 
     visiting.add(step.id);
 
-    // Visit dependencies first (based on artifact names, not slots)
     for (const artifactName of Object.values(step.inputs)) {
       const producerStep = findProducerStep(artifactName, steps);
-      if (producerStep) {
-        visit(producerStep);
-      }
+      if (producerStep) visit(producerStep);
     }
 
     visiting.delete(step.id);
@@ -464,9 +325,7 @@ const topologicalSort = (
   };
 
   for (const step of steps) {
-    if (!visited.has(step.id)) {
-      visit(step);
-    }
+    if (!visited.has(step.id)) visit(step);
   }
 
   return sorted;
@@ -474,9 +333,7 @@ const topologicalSort = (
 
 const findProducerStep = (
   artifactName: string,
-  steps: Array<StepDefinition | StepDefinitionV2>
-): StepDefinition | StepDefinitionV2 | undefined => {
-  return steps.find((step) =>
-    getOutputArtifactNames(step).includes(artifactName)
-  );
+  steps: StepDefinition[]
+): StepDefinition | undefined => {
+  return steps.find((step) => Object.values(step.outputs).includes(artifactName));
 };

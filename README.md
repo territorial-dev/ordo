@@ -103,18 +103,20 @@ Register a new recipe.
       {
         "id": "step1",
         "type": "PROCESS_TYPE",
+        "param_keys": ["param_name"],
         "inputs": {
-          "input_slot": "artifact_name"
+          "input_slot": "job:artifact_name"
         },
-        "outputs": ["output_artifact"],
-        "params": {}
+        "outputs": {
+          "output_slot": "step:step1.output_slot"
+        }
       }
     ]
   }
 }
 ```
 
-**Note:** The `inputs` field is an object mapping executor slot names to artifact names. The key is the executor's input slot (from `step_executor.accepts`), and the value is the artifact name to bind to that slot.
+**Note:** `inputs` maps executor slot names to namespaced artifact references (`job:<name>` for job-level inputs, `step:<stepId>.<slot>` for step outputs). `outputs` maps executor slot names to the artifact name assigned to that slot — use `step:<stepId>.<slot>` by convention.
 
 **Response:**
 
@@ -138,10 +140,11 @@ Validate a recipe definition without creating it. Useful for checking recipe val
         "id": "step1",
         "type": "PROCESS_TYPE",
         "inputs": {
-          "input_slot": "artifact_name"
+          "input_slot": "job:artifact_name"
         },
-        "outputs": ["output_artifact"],
-        "params": {}
+        "outputs": {
+          "output_slot": "step:step1.output_slot"
+        }
       }
     ]
   }
@@ -249,88 +252,89 @@ Health check endpoint (no authentication required).
 Recipes are validated against `step_executor` contracts before they can be stored. The validation ensures that:
 
 - **Step types exist**: Every step type must exist in the `{schema}.step_executor` table
-- **Step parameters**: Steps must not contain `params` (concrete values). Steps may declare required parameter names via optional `required_params` (array of strings). Steps with no required params can omit `required_params`.
-- **Input slot binding**: All input slots must exactly match the keys defined in `step_executor.accepts` (no missing, no extra). Each slot must be bound to an artifact name.
-- **Outputs match executor contracts**: All outputs must exactly match the keys defined in `step_executor.produces` (no renamed, no additional)
+- **Step parameters**: Steps must not contain `params` (concrete values). Steps may declare required parameter names via optional `param_keys` (array of unique strings). Steps with no required params can omit `param_keys`.
+- **Input slot binding**: All input slots must exactly match the keys defined in `step_executor.accepts` (no missing, no extra). Each slot value must be a namespaced artifact reference.
+- **Output slot binding**: All output slots must exactly match the keys defined in `step_executor.produces` (no missing, no extra). Each slot value must be a namespaced artifact name.
+- **Namespaced artifact references**: All artifact names must use a namespace prefix — `job:<name>` for job-level inputs, `step:<stepId>.<slot>` for step-produced artifacts. Bare names are rejected.
 - **Artifact flow is valid**: All referenced artifact names must be available (either from external inputs or produced by previous steps)
-- **Artifact names are immutable**: Output artifact names must flow unchanged into downstream steps (no aliasing or renaming)
+- **Artifact names are unique**: No two steps may assign the same artifact name.
 
-**Explicit Slot Binding Model:**
-
-The recipe uses explicit slot binding to connect artifacts to executor input slots:
+**Slot binding model:**
 
 ```json
 {
-  "inputs": {
-    "input_las": "output_las"
+  "inputs": { "input_las": "step:reproject.output_las" },
+  "outputs": { "output_dem": "step:dem.output_dem" }
+}
+```
+
+`inputs` keys are executor input slots (from `step_executor.accepts`); values are namespaced artifact references. `outputs` keys are executor output slots (from `step_executor.produces`); values are the artifact names assigned to those slots.
+
+Validation runs automatically on `POST /recipes` and can be tested independently via `POST /recipes/validate`. Errors include migration guidance when a legacy pattern is detected.
+
+**Recipe vs job:** Recipes define pipeline structure (steps, slot bindings, and which parameters each step requires via `param_keys`). Jobs supply concrete values at creation time: initial artifacts (keyed by `job:<name>`), optional output destinations, and per-step parameter values in `params`. Parameter values are not part of recipe identity and do not affect versioning.
+
+## Example Pipeline
+
+The following demonstrates a complete LiDAR processing pipeline.
+
+**Recipe (`POST /recipes`):**
+
+```json
+{
+  "name": "piney-dam-pipeline-example",
+  "version": "2.0.0",
+  "definition": {
+    "recipe": [
+      {
+        "id": "reproject",
+        "type": "REPROJECT_LAS",
+        "param_keys": ["source_epsg", "target_epsg"],
+        "inputs": { "input_las": "job:input_las" },
+        "outputs": { "output_las": "step:reproject.output_las" }
+      },
+      {
+        "id": "dem",
+        "type": "GENERATE_DEM",
+        "param_keys": ["resolution"],
+        "inputs": { "input_las": "step:reproject.output_las" },
+        "outputs": { "output_dem": "step:dem.output_dem" }
+      },
+      {
+        "id": "hillshade",
+        "type": "GENERATE_HILLSHADE",
+        "param_keys": ["azimuth", "altitude"],
+        "inputs": { "input_dem": "step:dem.output_dem" },
+        "outputs": { "output_hillshade": "step:hillshade.output_hillshade" }
+      },
+      {
+        "id": "contours",
+        "type": "GENERATE_CONTOURS",
+        "param_keys": ["interval"],
+        "inputs": { "input_dem": "step:dem.output_dem" },
+        "outputs": { "output_contours": "step:contours.output_contours" }
+      },
+      {
+        "id": "ept",
+        "type": "BUILD_EPT",
+        "inputs": { "input_las": "step:reproject.output_las" },
+        "outputs": { "output_ept": "step:ept.output_ept" }
+      }
+    ]
   }
 }
 ```
 
-This means: "Bind artifact `output_las` to executor slot `input_las`". The key is the executor's input slot name (from `step_executor.accepts`), and the value is the artifact name (which may be an external input or produced by a previous step).
-
-Validation happens automatically when creating a recipe via `POST /recipes`, and can be tested independently using `POST /recipes/validate`. Invalid recipes are rejected early with clear, actionable error messages.
-
-**Recipe vs job:** Recipes define pipeline structure (steps, inputs, outputs, and which parameters each step requires via `required_params`). Jobs supply concrete values at creation time: initial artifacts, optional outputs, and per-step parameter values in `params`. Parameter values are not part of recipe identity and do not affect recipe versioning.
-
-**Upgrading existing recipes:** If you have recipes stored with the old shape (steps with `params` objects containing concrete values), run the one-off migration script once: `npx ts-node scripts/migrate-recipe-params.ts`. It rewrites each step's `params` to `required_params` (array of param names) so the new validation and job-level params work correctly.
-
-## Example Pipeline
-
-The following example demonstrates a complete pipeline for processing LiDAR data:
+**Job (`POST /jobs`):**
 
 ```json
 {
-  "recipe": {
-    "name": "piney-dam-pipeline-example",
-    "version": "1.0.0",
-    "definition": {
-      "recipe": [
-        {
-          "id": "reproject",
-          "type": "REPROJECT_LAS",
-          "required_params": ["source_epsg", "target_epsg"],
-          "inputs": {
-            "input_las": "input_las"
-          },
-          "outputs": ["output_las"]
-        },
-        {
-          "id": "dem",
-          "type": "GENERATE_DEM",
-          "required_params": ["resolution"],
-          "inputs": {
-            "input_las": "output_las"
-          },
-          "outputs": ["output_dem"]
-        },
-        {
-          "id": "hillshade",
-          "type": "GENERATE_HILLSHADE",
-          "required_params": ["azimuth", "altitude"],
-          "inputs": {
-            "input_dem": "output_dem"
-          },
-          "outputs": ["output_hillshade"]
-        },
-        {
-          "id": "contours",
-          "type": "GENERATE_CONTOURS",
-          "required_params": ["interval"],
-          "inputs": {
-            "input_dem": "output_dem"
-          },
-          "outputs": ["output_contours"]
-        },
-        {
-          "id": "ept",
-          "type": "BUILD_EPT",
-          "inputs": {
-            "input_las": "output_las"
-          },
-          "outputs": ["output_ept"]
-        }
-      ]
+  "recipe_id": 1,
+  "inputs": {
+    "job:input_las": {
+      "type": "las",
+      "uri": "s3://bucket/path/to/file.las",
+      "hash": "abc123"
     }
   },
   "params": {
@@ -338,47 +342,34 @@ The following example demonstrates a complete pipeline for processing LiDAR data
     "dem": { "resolution": 1 },
     "hillshade": { "azimuth": 315, "altitude": 45 },
     "contours": { "interval": 1 }
+  },
+  "outputs": {
+    "step:dem.output_dem": { "path": "final/dem.tif" },
+    "step:hillshade.output_hillshade": { "path": "final/hillshade.tif" },
+    "step:contours.output_contours": { "path": "final/contours.geojson" },
+    "step:ept.output_ept": { "path": "final/ept" }
   }
 }
 ```
 
-**Artifact Flow:**
+**Artifact flow:**
 
-1. External input `input_las` is provided at job creation
-2. `reproject` step binds `input_las` to its `input_las` slot and produces `output_las`
-3. `dem` step binds `output_las` to its `input_las` slot and produces `output_dem`
-4. `hillshade` and `contours` steps both bind `output_dem` to their `input_dem` slots (parallel execution)
-5. `ept` step binds `output_las` to its `input_las` slot and produces `output_ept`
+1. `job:input_las` is provided at job creation
+2. `reproject` binds `job:input_las` to its `input_las` slot and assigns `step:reproject.output_las` to the result
+3. `dem` and `ept` both consume `step:reproject.output_las` — the producing step is visible in the name
+4. `hillshade` and `contours` both consume `step:dem.output_dem` (parallel fan-out)
+5. Job `outputs` reference artifact names by their full `step:<id>.<slot>` identifiers
 
-**Note:** Each artifact name must be unique across all steps. No two steps can produce the same artifact name.
+**Why this design:**
 
-**Explicit Slot Binding:**
-
-The recipe uses explicit slot binding to connect artifacts to executor input slots. For example:
-
-```json
-{
-  "inputs": {
-    "input_las": "output_las"
-  }
-}
-```
-
-This means: "Bind artifact `output_las` (produced by a previous step) to executor slot `input_las`". The key is the executor's input slot name (from `step_executor.accepts`), and the value is the artifact name.
-
-**Why This Design:**
-
-- **Explicit contracts**: Executors define slots, recipes bind artifacts to slots - no guessing
-- **Type safety**: The system can verify artifact types match step requirements
+- **Self-documenting edges**: `step:reproject.output_las` tells you exactly which step and slot produced the artifact — no external mapping needed
+- **Explicit contracts**: Executors define slots; recipes bind named artifacts to slots on both sides
+- **Safe fan-out**: Multiple downstream steps can reference the same `step:X.Y` artifact without ambiguity
 - **Deterministic execution**: Workers know exactly which artifacts to consume and produce
-- **Safe DAG execution**: No ambiguity about artifact identity across the pipeline
-- **Scales cleanly**: Supports fan-in, fan-out, multiple inputs of same type, and future optional inputs
 
-This design enables safe, parallel execution of DAG-based pipelines where workers pull work directly from PostgreSQL.
+## Recipe Format
 
-## New Recipe Format
-
-Starting with schema v2, Ordo supports a more expressive recipe format. Legacy recipes continue to work without modification.
+The current recipe format requires typed output maps and namespaced artifact references. The legacy format (array outputs, bare artifact names, `required_params`) is no longer accepted — submitting it returns a validation error with migration instructions.
 
 ### Typed outputs
 
@@ -419,137 +410,70 @@ Artifact names in the new format use a namespace prefix to make their origin exp
 
 Use these namespaced references as artifact name values in both `inputs` and `outputs`. The `step:stepId.slot` form encodes the producing step and slot directly in the name, making DAG edges self-documenting.
 
-### Example — new format (LiDAR pipeline)
+## Migrating from the Legacy Format
 
-The following is the [Example Pipeline](#example-pipeline) rewritten in the new format:
+The legacy recipe format is no longer accepted. Validation errors include the migration action needed.
 
-```json
-{
-  "recipe": {
-    "name": "piney-dam-pipeline-example",
-    "version": "2.0.0",
-    "definition": {
-      "recipe": [
-        {
-          "id": "reproject",
-          "type": "REPROJECT_LAS",
-          "param_keys": ["source_epsg", "target_epsg"],
-          "inputs": {
-            "input_las": "job:input_las"
-          },
-          "outputs": {
-            "output_las": "step:reproject.output_las"
-          }
-        },
-        {
-          "id": "dem",
-          "type": "GENERATE_DEM",
-          "param_keys": ["resolution"],
-          "inputs": {
-            "input_las": "step:reproject.output_las"
-          },
-          "outputs": {
-            "output_dem": "step:dem.output_dem"
-          }
-        },
-        {
-          "id": "hillshade",
-          "type": "GENERATE_HILLSHADE",
-          "param_keys": ["azimuth", "altitude"],
-          "inputs": {
-            "input_dem": "step:dem.output_dem"
-          },
-          "outputs": {
-            "output_hillshade": "step:hillshade.output_hillshade"
-          }
-        },
-        {
-          "id": "contours",
-          "type": "GENERATE_CONTOURS",
-          "param_keys": ["interval"],
-          "inputs": {
-            "input_dem": "step:dem.output_dem"
-          },
-          "outputs": {
-            "output_contours": "step:contours.output_contours"
-          }
-        },
-        {
-          "id": "ept",
-          "type": "BUILD_EPT",
-          "inputs": {
-            "input_las": "step:reproject.output_las"
-          },
-          "outputs": {
-            "output_ept": "step:ept.output_ept"
-          }
-        }
-      ]
-    }
-  },
-  "params": {
-    "reproject": { "source_epsg": "EPSG:2271", "target_epsg": "EPSG:3857" },
-    "dem": { "resolution": 1 },
-    "hillshade": { "azimuth": 315, "altitude": 45 },
-    "contours": { "interval": 1 }
-  }
-}
-```
-
-**What changed from the legacy format:**
-
-- `outputs` is now a map: the key is the executor slot (`output_las`), the value is the artifact name assigned in the DAG.
-- Artifact names use `job:` and `step:` prefixes. `job:input_las` means "the artifact named `input_las` provided at job creation". `step:reproject.output_las` means "the `output_las` slot produced by the `reproject` step".
-- `param_keys` replaces `required_params`. The shape is identical (array of unique strings); only the field name changes.
-- Concrete `params` at job creation are unchanged.
-
-**Artifact flow with namespaced refs:**
-
-1. `job:input_las` is provided at job creation
-2. `reproject` binds `job:input_las` to its `input_las` slot and names its output `step:reproject.output_las`
-3. `dem` and `ept` both reference `step:reproject.output_las` directly in their `inputs` — the producing step is clear from the name alone
-4. `hillshade` and `contours` reference `step:dem.output_dem` (parallel execution, same as legacy)
-
-**POST /recipes with new format:**
+### 1. Outputs: array → typed map
 
 ```json
-{
-  "name": "piney-dam-pipeline-example",
-  "version": "2.0.0",
-  "definition": {
-    "recipe": [
-      {
-        "id": "reproject",
-        "type": "REPROJECT_LAS",
-        "param_keys": ["source_epsg", "target_epsg"],
-        "inputs": { "input_las": "job:input_las" },
-        "outputs": { "output_las": "step:reproject.output_las" }
-      }
-    ]
-  }
-}
+// Before
+"outputs": ["output_las"]
+
+// After
+"outputs": { "output_las": "step:reproject.output_las" }
 ```
 
-**POST /jobs with new format:**
+The key is the executor output slot (unchanged from before). The value is the artifact name to assign — use `step:<stepId>.<slot>` by convention.
+
+### 2. Input artifact references: bare name → namespaced
 
 ```json
-{
-  "recipe_id": 1,
-  "inputs": {
-    "job:input_las": {
-      "type": "las",
-      "uri": "s3://bucket/path/to/file.las",
-      "hash": "abc123"
-    }
-  },
-  "params": {
-    "reproject": { "source_epsg": "EPSG:2271", "target_epsg": "EPSG:3857" }
-  },
-  "outputs": {
-    "step:reproject.output_las": { "path": "final/storage/reprojected.las" }
-  }
-}
+// Before
+"inputs": { "input_las": "output_las" }
+
+// After — referencing a job-level input
+"inputs": { "input_las": "job:input_las" }
+
+// After — referencing a previous step's output
+"inputs": { "input_las": "step:reproject.output_las" }
 ```
+
+### 3. Parameter declaration: required_params → param_keys
+
+```json
+// Before
+"required_params": ["source_epsg", "target_epsg"]
+
+// After
+"param_keys": ["source_epsg", "target_epsg"]
+```
+
+The shape is identical (array of unique strings). Rename the field only.
+
+### 4. Job inputs: bare key → job: prefix
+
+```json
+// Before
+"inputs": { "input_las": { "type": "las", "uri": "...", "hash": "..." } }
+
+// After
+"inputs": { "job:input_las": { "type": "las", "uri": "...", "hash": "..." } }
+```
+
+The `job:` key must match the artifact name referenced in the recipe's `inputs` values.
+
+### 5. Job outputs: bare key → step: prefix
+
+```json
+// Before
+"outputs": { "output_dem": { "path": "final/dem.tif" } }
+
+// After
+"outputs": { "step:dem.output_dem": { "path": "final/dem.tif" } }
+```
+
+The key must match the artifact name assigned in the recipe step's `outputs` map.
 
 ## Architecture
 

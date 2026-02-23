@@ -65,7 +65,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     for (const artifactName of Object.values(step.inputs)) {
       allArtifactNames.add(artifactName);
     }
-    step.outputs.forEach((o) => allOutputs.add(o));
+    Object.values(step.outputs).forEach((o) => allOutputs.add(o));
   }
 
   // Initial inputs are artifact names that are not produced by any step
@@ -114,7 +114,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
   // Validate job params: for each step with required_params, required keys must be present
   const jobParams = req.params ?? {};
   for (const step of recipeSteps) {
-    const requiredKeys = step.required_params ?? [];
+    const requiredKeys = step.param_keys ?? [];
     if (requiredKeys.length === 0) {
       continue;
     }
