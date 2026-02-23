@@ -376,6 +376,181 @@ This means: "Bind artifact `output_las` (produced by a previous step) to executo
 
 This design enables safe, parallel execution of DAG-based pipelines where workers pull work directly from PostgreSQL.
 
+## New Recipe Format
+
+Starting with schema v2, Ordo supports a more expressive recipe format. Legacy recipes continue to work without modification.
+
+### Typed outputs
+
+In the legacy format, `outputs` is a flat list of artifact names:
+
+```json
+"outputs": ["output_las"]
+```
+
+In the new format, `outputs` is a map of executor slot names to artifact names:
+
+```json
+"outputs": {
+  "output_las": "step:reproject.output_las"
+}
+```
+
+The key is the executor's output slot (matching `step_executor.produces`). The value is the artifact name assigned to that slot in the DAG. This mirrors the shape of `inputs` and makes contracts explicit on both sides of every step.
+
+### param_keys
+
+In the new format, use `param_keys` instead of `required_params` to declare which parameters a step requires:
+
+```json
+"param_keys": ["source_epsg", "target_epsg"]
+```
+
+`param_keys` must be an array of unique strings. Concrete values are still supplied at job creation via `params`, unchanged.
+
+### Namespaced artifact references
+
+Artifact names in the new format use a namespace prefix to make their origin explicit:
+
+| Prefix | Meaning | Example |
+|---|---|---|
+| `job:` | A job-level input artifact | `job:input_las` |
+| `step:` | An artifact produced by a specific step's output slot | `step:reproject.output_las` |
+
+Use these namespaced references as artifact name values in both `inputs` and `outputs`. The `step:stepId.slot` form encodes the producing step and slot directly in the name, making DAG edges self-documenting.
+
+### Example — new format (LiDAR pipeline)
+
+The following is the [Example Pipeline](#example-pipeline) rewritten in the new format:
+
+```json
+{
+  "recipe": {
+    "name": "piney-dam-pipeline-example",
+    "version": "2.0.0",
+    "definition": {
+      "recipe": [
+        {
+          "id": "reproject",
+          "type": "REPROJECT_LAS",
+          "param_keys": ["source_epsg", "target_epsg"],
+          "inputs": {
+            "input_las": "job:input_las"
+          },
+          "outputs": {
+            "output_las": "step:reproject.output_las"
+          }
+        },
+        {
+          "id": "dem",
+          "type": "GENERATE_DEM",
+          "param_keys": ["resolution"],
+          "inputs": {
+            "input_las": "step:reproject.output_las"
+          },
+          "outputs": {
+            "output_dem": "step:dem.output_dem"
+          }
+        },
+        {
+          "id": "hillshade",
+          "type": "GENERATE_HILLSHADE",
+          "param_keys": ["azimuth", "altitude"],
+          "inputs": {
+            "input_dem": "step:dem.output_dem"
+          },
+          "outputs": {
+            "output_hillshade": "step:hillshade.output_hillshade"
+          }
+        },
+        {
+          "id": "contours",
+          "type": "GENERATE_CONTOURS",
+          "param_keys": ["interval"],
+          "inputs": {
+            "input_dem": "step:dem.output_dem"
+          },
+          "outputs": {
+            "output_contours": "step:contours.output_contours"
+          }
+        },
+        {
+          "id": "ept",
+          "type": "BUILD_EPT",
+          "inputs": {
+            "input_las": "step:reproject.output_las"
+          },
+          "outputs": {
+            "output_ept": "step:ept.output_ept"
+          }
+        }
+      ]
+    }
+  },
+  "params": {
+    "reproject": { "source_epsg": "EPSG:2271", "target_epsg": "EPSG:3857" },
+    "dem": { "resolution": 1 },
+    "hillshade": { "azimuth": 315, "altitude": 45 },
+    "contours": { "interval": 1 }
+  }
+}
+```
+
+**What changed from the legacy format:**
+
+- `outputs` is now a map: the key is the executor slot (`output_las`), the value is the artifact name assigned in the DAG.
+- Artifact names use `job:` and `step:` prefixes. `job:input_las` means "the artifact named `input_las` provided at job creation". `step:reproject.output_las` means "the `output_las` slot produced by the `reproject` step".
+- `param_keys` replaces `required_params`. The shape is identical (array of unique strings); only the field name changes.
+- Concrete `params` at job creation are unchanged.
+
+**Artifact flow with namespaced refs:**
+
+1. `job:input_las` is provided at job creation
+2. `reproject` binds `job:input_las` to its `input_las` slot and names its output `step:reproject.output_las`
+3. `dem` and `ept` both reference `step:reproject.output_las` directly in their `inputs` — the producing step is clear from the name alone
+4. `hillshade` and `contours` reference `step:dem.output_dem` (parallel execution, same as legacy)
+
+**POST /recipes with new format:**
+
+```json
+{
+  "name": "piney-dam-pipeline-example",
+  "version": "2.0.0",
+  "definition": {
+    "recipe": [
+      {
+        "id": "reproject",
+        "type": "REPROJECT_LAS",
+        "param_keys": ["source_epsg", "target_epsg"],
+        "inputs": { "input_las": "job:input_las" },
+        "outputs": { "output_las": "step:reproject.output_las" }
+      }
+    ]
+  }
+}
+```
+
+**POST /jobs with new format:**
+
+```json
+{
+  "recipe_id": 1,
+  "inputs": {
+    "job:input_las": {
+      "type": "las",
+      "uri": "s3://bucket/path/to/file.las",
+      "hash": "abc123"
+    }
+  },
+  "params": {
+    "reproject": { "source_epsg": "EPSG:2271", "target_epsg": "EPSG:3857" }
+  },
+  "outputs": {
+    "step:reproject.output_las": { "path": "final/storage/reprojected.las" }
+  }
+}
+```
+
 ## Architecture
 
 - **Controllers**: Thin request/response handlers
