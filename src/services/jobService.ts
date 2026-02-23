@@ -144,7 +144,17 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     const jobId = jobResult.rows[0].id;
 
     // Insert initial artifacts
-    for (const [name, artifact] of Object.entries(req.inputs)) {
+    // Strip the "job:" namespace prefix before persisting — DB names are bare.
+    // Identity in the DB is (name, producer_step); inputs always have producer_step=NULL.
+    for (const [namespacedName, artifact] of Object.entries(req.inputs)) {
+      const name = namespacedName.startsWith("job:")
+        ? namespacedName.slice(4)
+        : namespacedName;
+      if (name.includes(":")) {
+        throw new Error(
+          `Invalid artifact name "${namespacedName}": names stored in the database must not contain namespace prefixes`,
+        );
+      }
       await client.query(
         `INSERT INTO ${schema}.job_artifact
          (job_id, name, type, uri, hash, producer_step, metadata)

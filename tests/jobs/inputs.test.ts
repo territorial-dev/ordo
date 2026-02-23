@@ -4,6 +4,9 @@
  * createJob computes which artifacts are "initial inputs" (referenced by steps
  * but not produced by any step) and enforces that the caller supplies exactly
  * those artifacts — no more, no less.
+ *
+ * Also verifies the persistence invariant: artifact names stored in the DB
+ * must be bare (no namespace prefix). The "job:" prefix is stripped before INSERT.
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
@@ -13,16 +16,22 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 const mockGetRecipe = vi.fn();
 
+// Use vi.hoisted so mockClientQuery is available inside the vi.mock factory.
+const { mockClientQuery } = vi.hoisted(() => {
+  const mockClientQuery = vi.fn().mockImplementation(async (sql: string) => {
+    if (typeof sql === 'string' && sql.includes('RETURNING id')) {
+      return { rows: [{ id: 99 }] };
+    }
+    return { rows: [] };
+  });
+  return { mockClientQuery };
+});
+
 vi.mock('../../src/db/connection', () => ({
   getPool: () => ({
     connect: () =>
       Promise.resolve({
-        query: (sql: string) => {
-          if (typeof sql === 'string' && sql.includes('RETURNING id')) {
-            return Promise.resolve({ rows: [{ id: 99 }] });
-          }
-          return Promise.resolve({ rows: [] });
-        },
+        query: mockClientQuery,
         release: () => {},
       }),
   }),
@@ -61,12 +70,23 @@ function artifact(type = 'pointcloud') {
   return { type, uri: 'file:///data', hash: 'sha256:abc' };
 }
 
+/** Returns the [sql, params] pair from the first job_artifact INSERT call. */
+function findArtifactInsert(): [string, unknown[]] | undefined {
+  for (const call of mockClientQuery.mock.calls) {
+    const [sql, params] = call as [string, unknown[]];
+    if (typeof sql === 'string' && sql.includes('job_artifact') && sql.includes('INSERT')) {
+      return [sql, params];
+    }
+  }
+  return undefined;
+}
+
 beforeEach(() => {
   vi.clearAllMocks();
 });
 
 // ---------------------------------------------------------------------------
-// Tests
+// Input presence / exclusivity tests
 // ---------------------------------------------------------------------------
 
 describe('job input artifact validation', () => {
@@ -170,5 +190,66 @@ describe('job input artifact validation', () => {
         },
       }),
     ).rejects.toThrow('Unexpected input artifact "step:step1.output"');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Persistence invariant: names stored in DB must be bare (no namespace prefix)
+// ---------------------------------------------------------------------------
+
+describe('artifact name persistence', () => {
+  it('strips the job: prefix before inserting into job_artifact', async () => {
+    const recipe = makeRecipe([
+      makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' }),
+    ]);
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await createJob({ recipe_id: 1, inputs: { 'job:raw': artifact() } });
+
+    const insert = findArtifactInsert();
+    expect(insert, 'expected a job_artifact INSERT call').toBeDefined();
+
+    const params = insert![1];
+    expect(params).toContain('raw');         // bare name is persisted
+    expect(params).not.toContain('job:raw'); // namespace prefix is gone
+  });
+
+  it('strips the job: prefix for multiple inputs', async () => {
+    const recipe = makeRecipe([
+      makeStep('joiner', 'double-in', { a: 'job:points', b: 'job:mesh' }, { result: 'step:joiner.result' }),
+    ]);
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await createJob({
+      recipe_id: 1,
+      inputs: {
+        'job:points': artifact('pointcloud'),
+        'job:mesh': artifact('mesh'),
+      },
+    });
+
+    const insertCalls = mockClientQuery.mock.calls.filter(
+      ([sql]: [string]) => typeof sql === 'string' && sql.includes('job_artifact') && sql.includes('INSERT'),
+    ) as [string, unknown[]][];
+
+    expect(insertCalls).toHaveLength(2);
+
+    const persistedNames = insertCalls.map(([, params]) => (params as unknown[])[1]);
+    expect(persistedNames).toContain('points');
+    expect(persistedNames).toContain('mesh');
+    expect(persistedNames).not.toContain('job:points');
+    expect(persistedNames).not.toContain('job:mesh');
+  });
+
+  it('throws if a name still contains a colon after stripping', async () => {
+    // A name like "job:step:bad" strips to "step:bad" which still has a colon — guard fires.
+    const recipe = makeRecipe([
+      makeStep('step1', 'single-io', { input: 'job:step:bad' }, { output: 'step:step1.output' }),
+    ]);
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await expect(
+      createJob({ recipe_id: 1, inputs: { 'job:step:bad': artifact() } }),
+    ).rejects.toThrow('must not contain namespace prefixes');
   });
 });
