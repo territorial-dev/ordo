@@ -1,26 +1,32 @@
 {
   "recipe": {
     "name": "agisoft-flight-pointcloud-pipeline-testing",
-    "version": "0.0.0",
+    "version": "0.1.0",
     "definition": {
       "recipe": [
         {
           "id": "agisoft",
           "type": "PROCESS_AGISOFT",
-          "inputs": { "input_psx_zip": "input_psx_zip" },
-          "outputs": ["output_orthomosaic_tif", "output_point_cloud_las"]
+          "inputs": { "input_psx_zip": "job:input_psx_zip" },
+          "outputs": {
+            "output_orthomosaic_tif": "step:agisoft.output_orthomosaic_tif",
+            "output_point_cloud_las": "step:agisoft.output_point_cloud_las"
+          }
         },
         {
-          "id": "agisoft",
+          "id": "process_point_cloud",
           "type": "PROCESS_POINTCLOUD",
-          "inputs": { "input_point_cloud": "output_point_cloud_las" },
-          "outputs": ["output_ctm_tif", "output_tth_shp"]
+          "inputs": { "input_point_cloud": "step:agisoft.output_point_cloud_las" },
+          "outputs": {
+            "output_ctm_tif": "step:process_point_cloud.output_ctm_tif",
+            "output_tth_shp": "step:process_point_cloud.output_tth_shp"
+          }
         }
       ]
     }
   },
   "inputs": {
-    "input_psx_zip": {
+    "job:input_psx_zip": {
       "type": "zip",
       "uri": "development/G_531_JustPhotos_And_PSX_FILE SMALL.zip",
       "hash": "xxx",

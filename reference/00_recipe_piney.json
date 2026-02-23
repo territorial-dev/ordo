@@ -1,27 +1,27 @@
 {
   "recipe": {
     "name": "piney-dam-pipeline-example",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "definition": {
       "recipe": [
         {
           "id": "reproject",
           "type": "REPROJECT_LAS",
-          "required_params": ["source_epsg", "target_epsg"],
-          "inputs": { "input_las": "input_las" },
-          "outputs": ["output_las"]
+          "param_keys": ["source_epsg", "target_epsg"],
+          "inputs": { "input_las": "job:input_las" },
+          "outputs": { "output_las": "step:reproject.output_las" }
         },
         {
           "id": "ept",
           "type": "BUILD_EPT",
-          "inputs": { "input_las": "output_las" },
-          "outputs": ["output_ept"]
+          "inputs": { "input_las": "step:reproject.output_las" },
+          "outputs": { "output_ept": "step:ept.output_ept" }
         }
       ]
     }
   },
   "inputs": {
-    "input_las": {
+    "job:input_las": {
       "type": "las",
       "uri": "development/PINEY DAM MBES 1IN.laz",
       "hash": "abc123def456",
@@ -31,5 +31,7 @@
   "params": {
     "reproject": { "source_epsg": "EPSG:2271", "target_epsg": "EPSG:3857" }
   },
-  "outputs": { "output_ept": { "path": "final/piney-dam/ept" } }
+  "outputs": {
+    "step:ept.output_ept": { "path": "final/piney-dam/ept" }
+  }
 }

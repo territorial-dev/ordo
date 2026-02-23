@@ -1,10 +1,9 @@
 export interface StepDefinition {
   id: string;
   type: string;
-  inputs: Record<string, string>; // slot name -> artifact name
-  outputs: string[];
-  /** Declaration of required params only; optional. If absent, step has no required params. */
-  required_params?: string[];
+  inputs: Record<string, string>;  // slot name -> namespaced artifact name (job:<n> or step:<id>.<slot>)
+  outputs: Record<string, string>; // slot name -> namespaced artifact name (step:<id>.<slot>)
+  param_keys?: string[];
 }
 
 export interface RecipeDefinition {
@@ -103,6 +102,6 @@ export interface JobStatusResponse {
 export interface StepExecutor {
   step_type: string;
   n8n_workflow: string;
-  accepts: Record<string, string>; // artifact name -> artifact type
-  produces: Record<string, string>; // artifact name -> artifact type
+  accepts: Record<string, string>; // slot name -> artifact type
+  produces: Record<string, string>; // slot name -> artifact type
 }

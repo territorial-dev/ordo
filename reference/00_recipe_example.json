@@ -1,49 +1,49 @@
 {
   "recipe": {
     "name": "example-recipe",
-    "version": "1.0.0",
+    "version": "2.0.0",
     "definition": {
       "recipe": [
         {
           "id": "reproject",
           "type": "REPROJECT_LAS",
-          "required_params": ["source_epsg", "target_epsg"],
-          "inputs": { "input_las": "input_las" },
-          "outputs": ["output_las"]
+          "param_keys": ["source_epsg", "target_epsg"],
+          "inputs": { "input_las": "job:input_las" },
+          "outputs": { "output_las": "step:reproject.output_las" }
         },
         {
           "id": "dem",
           "type": "GENERATE_DEM",
-          "required_params": ["resolution", "method"],
-          "inputs": { "input_las": "output_las" },
-          "outputs": ["output_dem"]
+          "param_keys": ["resolution", "method"],
+          "inputs": { "input_las": "step:reproject.output_las" },
+          "outputs": { "output_dem": "step:dem.output_dem" }
         },
         {
           "id": "hillshade",
           "type": "GENERATE_HILLSHADE",
-          "required_params": ["azimuth", "altitude"],
-          "inputs": { "input_dem": "output_dem" },
-          "outputs": ["output_hillshade"]
+          "param_keys": ["azimuth", "altitude"],
+          "inputs": { "input_dem": "step:dem.output_dem" },
+          "outputs": { "output_hillshade": "step:hillshade.output_hillshade" }
         },
         {
           "id": "contours",
           "type": "GENERATE_CONTOURS",
-          "required_params": ["interval"],
-          "inputs": { "input_dem": "output_dem" },
-          "outputs": ["output_contours"]
+          "param_keys": ["interval"],
+          "inputs": { "input_dem": "step:dem.output_dem" },
+          "outputs": { "output_contours": "step:contours.output_contours" }
         },
         {
           "id": "ept",
           "type": "BUILD_EPT",
-          "required_params": ["resolution"],
-          "inputs": { "input_las": "output_las" },
-          "outputs": ["output_ept"]
+          "param_keys": ["resolution"],
+          "inputs": { "input_las": "step:reproject.output_las" },
+          "outputs": { "output_ept": "step:ept.output_ept" }
         }
       ]
     }
   },
   "inputs": {
-    "input_las": {
+    "job:input_las": {
       "type": "las",
       "uri": "s3://bucket/path/to/file.las",
       "hash": "abc123",
@@ -58,9 +58,9 @@
     "ept": { "resolution": "auto" }
   },
   "outputs": {
-    "output_dem": { "path": "final/dem.tif" },
-    "output_hillshade": { "path": "final/hillshade.tif" },
-    "output_contours": { "path": "final/contours.geojson" },
-    "output_ept": { "path": "final/ept" }
+    "step:dem.output_dem": { "path": "final/dem.tif" },
+    "step:hillshade.output_hillshade": { "path": "final/hillshade.tif" },
+    "step:contours.output_contours": { "path": "final/contours.geojson" },
+    "step:ept.output_ept": { "path": "final/ept" }
   }
 }

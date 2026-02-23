@@ -65,7 +65,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     for (const artifactName of Object.values(step.inputs)) {
       allArtifactNames.add(artifactName);
     }
-    step.outputs.forEach((o) => allOutputs.add(o));
+    Object.values(step.outputs).forEach((o) => allOutputs.add(o));
   }
 
   // Initial inputs are artifact names that are not produced by any step
@@ -114,7 +114,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
   // Validate job params: for each step with required_params, required keys must be present
   const jobParams = req.params ?? {};
   for (const step of recipeSteps) {
-    const requiredKeys = step.required_params ?? [];
+    const requiredKeys = step.param_keys ?? [];
     if (requiredKeys.length === 0) {
       continue;
     }
@@ -144,7 +144,17 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     const jobId = jobResult.rows[0].id;
 
     // Insert initial artifacts
-    for (const [name, artifact] of Object.entries(req.inputs)) {
+    // Strip the "job:" namespace prefix before persisting — DB names are bare.
+    // Identity in the DB is (name, producer_step); inputs always have producer_step=NULL.
+    for (const [namespacedName, artifact] of Object.entries(req.inputs)) {
+      const name = namespacedName.startsWith("job:")
+        ? namespacedName.slice(4)
+        : namespacedName;
+      if (name.includes(":")) {
+        throw new Error(
+          `Invalid artifact name "${namespacedName}": names stored in the database must not contain namespace prefixes`,
+        );
+      }
       await client.query(
         `INSERT INTO ${schema}.job_artifact
          (job_id, name, type, uri, hash, producer_step, metadata)
