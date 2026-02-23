@@ -1,0 +1,56 @@
+{
+  "recipe": {
+    "name": "agisoft-publish-wmts-run",
+    "version": "1.0.2",
+    "definition": {
+      "recipe": [
+        {
+          "id": "process_agisoft",
+          "type": "PROCESS_AGISOFT",
+          "inputs": {
+            "input_photos": "job:photos_zip"
+          },
+          "outputs": {
+            "orthomosaic_tif": "step:process_agisoft.orthomosaic_tif",
+            "point_cloud_las": "step:process_agisoft.point_cloud_las"
+          }
+        },
+        {
+          "id": "publish_flight",
+          "type": "PUBLISH_FLIGHT_WMTS",
+          "param_keys": ["workspace", "layer_name", "layer_title", "file_name"],
+          "inputs": {
+            "input_tif": "step:process_agisoft.orthomosaic_tif"
+          },
+          "outputs": {
+            "flight_cog": "step:publish_flight.flight_cog"
+          }
+        }
+      ]
+    }
+  },
+
+  "inputs": {
+    "job:photos_zip": {
+      "type": "zip",
+      "uri": "development/SMALL_TEST_RUN",
+      "hash": "xxx",
+      "metadata": {}
+    }
+  },
+
+  "params": {
+    "publish_flight": {
+      "workspace": "skyport",
+      "layer_name": "n8n_v2_test",
+      "layer_title": "n8n v2 Test Run",
+      "file_name": "n8n_v2_test_run"
+    }
+  },
+
+  "outputs": {
+    "step:publish_flight.flight_cog": {
+      "path": "final/skyport/n8n_v2_test_run.tif"
+    }
+  }
+}
