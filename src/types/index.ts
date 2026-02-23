@@ -5,10 +5,31 @@ export interface StepDefinition {
   outputs: string[];
   /** Declaration of required params only; optional. If absent, step has no required params. */
   required_params?: string[];
+  /** Alias for required_params introduced in the v2 schema. */
+  param_keys?: string[];
+}
+
+/**
+ * New-style step definition where outputs is a typed map of slot_name → artifact_name,
+ * mirroring the inputs shape. Introduced as a non-breaking addition alongside StepDefinition.
+ */
+export interface StepDefinitionV2 {
+  id: string;
+  type: string;
+  inputs: Record<string, string>;  // slot name -> artifact name
+  outputs: Record<string, string>; // slot name -> artifact name
+  param_keys?: string[];
+  /** @deprecated Prefer param_keys. Kept for compatibility with old recipes. */
+  required_params?: string[];
 }
 
 export interface RecipeDefinition {
   recipe: StepDefinition[];
+}
+
+/** New-style recipe definition using StepDefinitionV2 (typed outputs map). */
+export interface RecipeDefinitionV2 {
+  recipe: StepDefinitionV2[];
 }
 
 export interface Recipe {
