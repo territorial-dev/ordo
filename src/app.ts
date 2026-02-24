@@ -36,6 +36,7 @@ import {
 } from "./controllers/outputController";
 import { closePool } from "./db/connection";
 import { runMigrations } from "./db/migrations";
+import { version } from "../package.json";
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -106,7 +107,7 @@ if (require.main === module) {
     try {
       await runMigrations();
       app.listen(PORT, () => {
-        console.log(`Ordo server listening on port ${PORT}`);
+        console.log(`Ordo v${version} listening on port ${PORT}`);
       });
     } catch (error) {
       console.error("Failed to run migrations:", error);
