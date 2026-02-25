@@ -122,4 +122,6 @@ export interface StepExecutor {
   n8n_workflow: string;
   accepts: Record<string, string>; // slot name -> artifact type
   produces: Record<string, string>; // slot name -> artifact type
+  description?: string | null;
+  params?: Record<string, any> | null;
 }

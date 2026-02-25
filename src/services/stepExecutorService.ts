@@ -26,6 +26,24 @@ export const getStepExecutor = async (
   };
 };
 
+export const listStepExecutors = async (): Promise<StepExecutor[]> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const result = await pool.query(
+    `SELECT step_type, accepts, produces, description, params
+     FROM ${schema}.step_executor
+     ORDER BY step_type`
+  );
+
+  return result.rows.map((row) => ({
+    step_type: row.step_type,
+    accepts: row.accepts,
+    produces: row.produces,
+    description: row.description ?? null,
+    params: row.params ?? null,
+  }));
+};
+
 export const getStepExecutors = async (
   stepTypes: string[]
 ): Promise<Map<string, StepExecutor>> => {

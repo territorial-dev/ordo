@@ -34,6 +34,7 @@ import {
   listOutputsHandler,
   getOutputHandler,
 } from "./controllers/outputController";
+import { listExecutorsHandler } from "./controllers/executorController";
 import { closePool } from "./db/connection";
 import { runMigrations } from "./db/migrations";
 import { version } from "../package.json";
@@ -80,6 +81,9 @@ app.get("/artifacts/:id", getArtifactHandler);
 // Output endpoints
 app.get("/outputs", listOutputsHandler);
 app.get("/outputs/:id", getOutputHandler);
+
+// Executor endpoints
+app.get("/executors", listExecutorsHandler);
 
 // Error handling middleware
 app.use(
