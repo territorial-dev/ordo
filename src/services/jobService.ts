@@ -12,6 +12,7 @@ import {
   createRecipe,
   getRecipeByNameAndVersion,
 } from "./recipeService";
+import { ValidationError } from "../utils/validation";
 
 export const createJob = async (req: CreateJobRequest): Promise<number> => {
   const pool = getPool();
@@ -84,7 +85,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
   // Check that all initial inputs are provided
   for (const requiredInput of initialInputs) {
     if (!req.inputs[requiredInput]) {
-      throw new Error(
+      throw new ValidationError(
         `Missing required initial input artifact: ${requiredInput}`,
       );
     }
@@ -94,7 +95,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
   const providedInputs = new Set(Object.keys(req.inputs));
   for (const providedInput of providedInputs) {
     if (!initialInputs.has(providedInput)) {
-      throw new Error(
+      throw new ValidationError(
         `Unexpected input artifact "${providedInput}": not required by recipe. Required inputs: ${Array.from(
           initialInputs,
         ).join(", ")}`,
@@ -107,7 +108,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     const requestedOutputs = Object.keys(req.outputs);
     for (const artifactName of requestedOutputs) {
       if (!allOutputs.has(artifactName)) {
-        throw new Error(
+        throw new ValidationError(
           `Invalid job output "${artifactName}": artifact is not producible by recipe. Producible artifacts: ${Array.from(
             allOutputs,
           ).join(", ")}`,
@@ -126,7 +127,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     const provided = jobParams[step.id];
     for (const paramName of requiredKeys) {
       if (provided === undefined || !(paramName in provided)) {
-        throw new Error(
+        throw new ValidationError(
           `Missing required param "${paramName}" for step "${step.id}"`,
         );
       }
@@ -156,7 +157,7 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
         ? namespacedName.slice(4)
         : namespacedName;
       if (name.includes(":")) {
-        throw new Error(
+        throw new ValidationError(
           `Invalid artifact name "${namespacedName}": names stored in the database must not contain namespace prefixes`,
         );
       }

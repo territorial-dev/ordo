@@ -110,20 +110,9 @@ export const createJobHandler = async (
       res.status(400).json({ error: error.message });
       return;
     }
-    if (error instanceof Error) {
-      if (error.message.includes("not found")) {
-        res.status(404).json({ error: error.message });
-        return;
-      }
-      if (
-        error.message.includes("Missing required") ||
-        error.message.includes("Missing required param") ||
-        error.message.includes("Unexpected input") ||
-        error.message.includes("must be provided")
-      ) {
-        res.status(400).json({ error: error.message });
-        return;
-      }
+    if (error instanceof Error && error.message.includes("not found")) {
+      res.status(404).json({ error: error.message });
+      return;
     }
     console.error("Error creating job:", error);
     res.status(500).json({ error: "Internal server error" });
