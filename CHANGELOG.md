@@ -1,3 +1,16 @@
+# [1.2.0](https://github.com/territorial-dev/ordo/compare/v1.1.0...v1.2.0) (2026-02-25)
+
+
+### Bug Fixes
+
+* allows ommiting the definiton on a recipe if it exists ([f458b4b](https://github.com/territorial-dev/ordo/commit/f458b4b173b3a827eb77a1476d776eaa41c5725c))
+* include n8n_workflow in listStepExecutors query ([79aa349](https://github.com/territorial-dev/ordo/commit/79aa349569a783f5b947709ef56d7d37907b2da9))
+
+
+### Features
+
+* added description and params metadata to step executors ([7b01b68](https://github.com/territorial-dev/ordo/commit/7b01b68b3ba12fae924e8582f83e1b7ae274d036))
+
 # [1.1.0](https://github.com/territorial-dev/ordo/compare/v1.0.0...v1.1.0) (2026-02-25)
 
 
