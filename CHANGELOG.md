@@ -1,3 +1,10 @@
+## [1.2.1](https://github.com/territorial-dev/ordo/compare/v1.2.0...v1.2.1) (2026-02-25)
+
+
+### Bug Fixes
+
+* return 400 instead of 500 for job validation errors ([8a8d11c](https://github.com/territorial-dev/ordo/commit/8a8d11ce21744f2a5925ca10df4336f0d90babcf))
+
 # [1.2.0](https://github.com/territorial-dev/ordo/compare/v1.1.0...v1.2.0) (2026-02-25)
 
 
