@@ -25,13 +25,9 @@ export const createJobHandler = async (
     }
 
     if (body.recipe) {
-      if (
-        !body.recipe.name ||
-        !body.recipe.version ||
-        !body.recipe.definition
-      ) {
+      if (!body.recipe.name || !body.recipe.version) {
         res.status(400).json({
-          error: "recipe must have name, version, and definition",
+          error: "recipe must have name and version",
         });
         return;
       }

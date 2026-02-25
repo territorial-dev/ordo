@@ -71,7 +71,7 @@ export interface CreateJobRequest {
   recipe?: {
     name: string;
     version: string;
-    definition: RecipeDefinition;
+    definition?: RecipeDefinition;
   };
   inputs: Record<
     string,

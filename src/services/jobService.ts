@@ -34,6 +34,11 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
       req.recipe.version,
     );
     if (!recipe) {
+      if (!req.recipe.definition) {
+        throw new Error(
+          `Recipe "${req.recipe.name}@${req.recipe.version}" not found`,
+        );
+      }
       // Create new recipe
       recipeId = await createRecipe({
         name: req.recipe.name,
