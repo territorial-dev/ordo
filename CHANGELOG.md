@@ -1,3 +1,10 @@
+# [1.1.0](https://github.com/territorial-dev/ordo/compare/v1.0.0...v1.1.0) (2026-02-25)
+
+
+### Features
+
+* added progress to /job/:id endpoint ([70a1aba](https://github.com/territorial-dev/ordo/commit/70a1aba904c462b19f71ed9fa1d1758133950e99))
+
 # 1.0.0 (2026-02-24)
 
 

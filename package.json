@@ -1,6 +1,6 @@
 {
   "name": "ordo",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Ordo is a contract-driven orchestration core for running deterministic, artifact-based DAG jobs with a strict separation between computation and delivery.",
   "main": "dist/app.js",
   "scripts": {
