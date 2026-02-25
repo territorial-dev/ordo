@@ -291,7 +291,44 @@ export const getJobStatus = async (
     created_at: row.created_at,
   }));
 
-  return { job, steps, artifacts, outputs };
+  // Compute progress
+  const completed_steps = steps.filter(
+    (s) => s.status === "success" || s.status === "failed"
+  ).length;
+  const total_steps = steps.length;
+  const progress = {
+    percentage: total_steps > 0 ? completed_steps / total_steps : 0,
+    completed_steps,
+    total_steps,
+  };
+
+  // Compute job-level duration_ms
+  const duration_ms =
+    job.started_at && job.finished_at
+      ? new Date(job.finished_at).getTime() - new Date(job.started_at).getTime()
+      : null;
+
+  // Build timeline sorted by started_at ascending
+  const timeline = [...steps]
+    .sort((a, b) => {
+      if (!a.started_at && !b.started_at) return 0;
+      if (!a.started_at) return 1;
+      if (!b.started_at) return -1;
+      return new Date(a.started_at).getTime() - new Date(b.started_at).getTime();
+    })
+    .map((s) => ({
+      step: s.step_id,
+      type: s.step_type,
+      status: s.status,
+      started_at: s.started_at,
+      finished_at: s.finished_at,
+      duration_ms:
+        s.started_at && s.finished_at
+          ? new Date(s.finished_at).getTime() - new Date(s.started_at).getTime()
+          : null,
+    }));
+
+  return { job, progress, duration_ms, timeline, steps, artifacts, outputs };
 };
 
 export const listJobs = async (): Promise<Job[]> => {

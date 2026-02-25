@@ -92,8 +92,26 @@ export interface CreateJobRequest {
   params?: Record<string, Record<string, any>>;
 }
 
+export interface JobProgress {
+  percentage: number;
+  completed_steps: number;
+  total_steps: number;
+}
+
+export interface JobTimelineEntry {
+  step: string;
+  type: string;
+  status: JobStep["status"];
+  started_at: Date | null;
+  finished_at: Date | null;
+  duration_ms: number | null;
+}
+
 export interface JobStatusResponse {
   job: Job;
+  progress: JobProgress;
+  duration_ms: number | null;
+  timeline: JobTimelineEntry[];
   steps: JobStep[];
   artifacts: JobArtifact[];
   outputs: JobOutput[];
