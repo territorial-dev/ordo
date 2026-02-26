@@ -1,3 +1,10 @@
+# [1.3.0](https://github.com/territorial-dev/ordo/compare/v1.2.1...v1.3.0) (2026-02-26)
+
+
+### Features
+
+* added /jobs/:{array_of_ids} endpoint ([426aa84](https://github.com/territorial-dev/ordo/commit/426aa840105e22b1d14246827450682a7ae39688))
+
 ## [1.2.1](https://github.com/territorial-dev/ordo/compare/v1.2.0...v1.2.1) (2026-02-25)
 
 
