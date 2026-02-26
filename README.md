@@ -248,6 +248,40 @@ Get job status, steps, and artifacts.
 }
 ```
 
+You can also query by an array of IDs, for example: `/jobs/1,2,3`
+
+The response will be an array of objects instead of a single object:
+
+```
+[
+  {
+    "job": {
+      "id": 1,
+      ...
+    },
+    "steps": [...],
+    "artifacts": [...]
+  },
+  {
+    "job": {
+      "id": 2,
+      ...
+    },
+    "steps": [...],
+    "artifacts": [...]
+  },
+  {
+    "job": {
+      "id": 3,
+      ...
+    },
+    "steps": [...],
+    "artifacts": [...]
+  },
+]
+```
+
+
 ### GET /health
 
 Health check endpoint (no authentication required).
