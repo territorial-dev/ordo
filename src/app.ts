@@ -19,6 +19,7 @@ import {
   createJobHandler,
   listJobsHandler,
   getJobStatusHandler,
+  getBatchJobStatusHandler,
 } from "./controllers/jobController";
 import {
   listRecipesHandler,
@@ -71,6 +72,7 @@ app.post("/recipes", createRecipeHandler);
 
 // Job endpoints
 app.get("/jobs", listJobsHandler);
+app.get("/jobs/:ids([0-9,]+,[0-9,]+)", getBatchJobStatusHandler);
 app.get("/jobs/:id", getJobStatusHandler);
 app.post("/jobs", createJobHandler);
 

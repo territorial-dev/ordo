@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { createJob, getJobStatus, listJobs } from "../services/jobService";
+import { createJob, getJobStatus, getJobsBatch, listJobs } from "../services/jobService";
 import { CreateJobRequest } from "../types";
 import { ValidationError } from "../utils/validation";
 
@@ -132,6 +132,51 @@ export const listJobsHandler = async (
   }
 };
 
+export const getBatchJobStatusHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const raw = req.params.ids;
+  const parts = raw.split(",");
+  const jobIds: number[] = [];
+
+  for (const part of parts) {
+    const trimmed = part.trim();
+    if (!/^\d+$/.test(trimmed)) {
+      res.status(400).json({ error: `Invalid job ID: "${trimmed}"` });
+      return;
+    }
+    const id = parseInt(trimmed, 10);
+    if (id <= 0) {
+      res.status(400).json({ error: `Job ID must be a positive integer: "${trimmed}"` });
+      return;
+    }
+    jobIds.push(id);
+  }
+
+  if (jobIds.length < 2) {
+    res.status(400).json({ error: "Batch endpoint requires at least 2 job IDs" });
+    return;
+  }
+
+  if (jobIds.length > 100) {
+    res.status(400).json({ error: "Cannot request more than 100 job IDs at once" });
+    return;
+  }
+
+  try {
+    const statusMap = await getJobsBatch(jobIds);
+    const response = jobIds.map((id) => {
+      const status = statusMap.get(id);
+      return status ? { id, found: true, ...status } : { id, found: false };
+    });
+    res.json(response);
+  } catch (error) {
+    console.error("Error getting batch job status:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
 export const getJobStatusHandler = async (
   req: Request,
   res: Response
@@ -157,3 +202,4 @@ export const getJobStatusHandler = async (
     res.status(500).json({ error: "Internal server error" });
   }
 };
+
