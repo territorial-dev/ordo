@@ -1,4 +1,4 @@
-import { RecipeDefinition, StepDefinition, StepExecutor } from "../types";
+import { OnExitStep, RecipeDefinition, StepDefinition, StepExecutor } from "../types";
 import { getStepExecutors } from "../services/stepExecutorService";
 
 export class ValidationError extends Error {
@@ -53,8 +53,10 @@ export const validateRecipe = async (
     }
   }
 
-  // Collect all unique step types and batch-fetch executors
-  const stepTypes = Array.from(new Set(definition.recipe.map((s) => s.type)));
+  // Collect all unique step types (including on_exit if present) and batch-fetch executors
+  const stepTypeSet = new Set(definition.recipe.map((s) => s.type));
+  if (definition.on_exit?.type) stepTypeSet.add(definition.on_exit.type);
+  const stepTypes = Array.from(stepTypeSet);
   const executorMap = await getStepExecutors(stepTypes);
 
   // Rule 1: Step type must exist in step_executor
@@ -135,6 +137,29 @@ export const validateRecipe = async (
     if (!visited.has(step.id)) {
       if (hasCycle(step.id, new Set<string>())) {
         throw new ValidationError("Recipe contains a cycle");
+      }
+    }
+  }
+
+  // Validate on_exit hook if present
+  if (definition.on_exit) {
+    validateOnExitStep(definition.on_exit);
+
+    const onExitExecutor = executorMap.get(definition.on_exit.type);
+    if (!onExitExecutor) {
+      throw new ValidationError(`Unsupported step type: ${definition.on_exit.type}`);
+    }
+
+    validateInputsMatchAccepts(
+      definition.on_exit as unknown as StepDefinition,
+      onExitExecutor,
+    );
+
+    for (const artifactName of Object.values(definition.on_exit.inputs)) {
+      if (!availableArtifacts.has(artifactName)) {
+        throw new ValidationError(
+          `on_exit step input references unavailable artifact: ${artifactName}`,
+        );
       }
     }
   }
@@ -244,6 +269,76 @@ const validateStep = (step: StepDefinition): void => {
       if (seen.has(k)) {
         throw new ValidationError(
           `Step "${step.id}" param_keys contains duplicate key: "${k}"`
+        );
+      }
+      seen.add(k);
+    }
+  }
+};
+
+const validateOnExitStep = (step: OnExitStep | any): void => {
+  if (Array.isArray(step)) {
+    throw new ValidationError(
+      "on_exit must be a single step object, not an array",
+    );
+  }
+
+  if (!step.id || typeof step.id !== "string") {
+    throw new ValidationError('on_exit step must have a string "id"');
+  }
+
+  if (!step.type || typeof step.type !== "string") {
+    throw new ValidationError('on_exit step must have a string "type"');
+  }
+
+  if (
+    typeof step.inputs !== "object" ||
+    step.inputs === null ||
+    Array.isArray(step.inputs)
+  ) {
+    throw new ValidationError(
+      'on_exit step must have an "inputs" object (slot -> artifact mapping)',
+    );
+  }
+
+  if ("outputs" in step && step.outputs !== undefined) {
+    throw new ValidationError("on_exit step must not declare outputs");
+  }
+
+  if ("depends_on" in step && step.depends_on !== undefined) {
+    throw new ValidationError("on_exit step must not declare depends_on");
+  }
+
+  for (const [slot, artifact] of Object.entries(step.inputs)) {
+    if (typeof slot !== "string" || typeof artifact !== "string") {
+      throw new ValidationError(
+        `on_exit step inputs must map slot names (strings) to artifact names (strings)`,
+      );
+    }
+    if (!isNamespacedRef(artifact as string)) {
+      throw new ValidationError(
+        `on_exit step input slot "${slot}" has unqualified artifact reference "${artifact}". ` +
+        `Use "job:<name>" for job-level inputs or "step:<stepId>.<slot>" for step outputs.`,
+      );
+    }
+  }
+
+  if (step.param_keys !== undefined) {
+    if (!Array.isArray(step.param_keys)) {
+      throw new ValidationError(
+        "on_exit step param_keys must be an array of strings",
+      );
+    }
+    const seen = new Set<string>();
+    for (const k of step.param_keys) {
+      if (typeof k !== "string") {
+        throw new ValidationError(
+          "on_exit step param_keys must contain only strings",
+        );
+      }
+      if (seen.has(k)) {
+        throw new ValidationError(
+          `on_exit step param_keys contains duplicate key: "${k}"`,
         );
       }
       seen.add(k);

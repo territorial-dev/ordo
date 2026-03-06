@@ -174,3 +174,85 @@ describe('job param validation', () => {
     ).resolves.toBeTypeOf('number');
   });
 });
+
+// ---------------------------------------------------------------------------
+// on_exit param validation
+// ---------------------------------------------------------------------------
+
+describe('on_exit param validation', () => {
+  function makeRecipeWithOnExit(
+    steps: ReturnType<typeof makeStep>[],
+    onExitParamKeys?: string[],
+  ): Recipe {
+    return {
+      id: 1,
+      name: 'test-recipe',
+      version: '1.0',
+      created_at: new Date(),
+      definition: {
+        recipe: steps,
+        on_exit: {
+          id: 'notify',
+          type: 'on-exit-webhook',
+          inputs: { metadata: 'step:step1.output' },
+          ...(onExitParamKeys ? { param_keys: onExitParamKeys } : {}),
+        },
+      },
+    };
+  }
+
+  it('rejects when on_exit param_keys are declared but not provided', async () => {
+    const recipe = makeRecipeWithOnExit(
+      [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      ['webhook_url'],
+    );
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await expect(
+      createJob({ recipe_id: 1, inputs: singleInput }),
+    ).rejects.toThrow('Missing required param "webhook_url" for on_exit step "notify"');
+  });
+
+  it('rejects when only some on_exit param_keys are provided', async () => {
+    const recipe = makeRecipeWithOnExit(
+      [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      ['webhook_url', 'secret'],
+    );
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await expect(
+      createJob({
+        recipe_id: 1,
+        inputs: singleInput,
+        params: { notify: { webhook_url: 'https://example.com' } }, // missing 'secret'
+      }),
+    ).rejects.toThrow('Missing required param "secret" for on_exit step "notify"');
+  });
+
+  it('succeeds when all on_exit param_keys are provided', async () => {
+    const recipe = makeRecipeWithOnExit(
+      [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      ['webhook_url'],
+    );
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await expect(
+      createJob({
+        recipe_id: 1,
+        inputs: singleInput,
+        params: { notify: { webhook_url: 'https://example.com' } },
+      }),
+    ).resolves.toBeTypeOf('number');
+  });
+
+  it('succeeds when on_exit has no param_keys and no params are supplied', async () => {
+    const recipe = makeRecipeWithOnExit([
+      makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' }),
+    ]);
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await expect(
+      createJob({ recipe_id: 1, inputs: singleInput }),
+    ).resolves.toBeTypeOf('number');
+  });
+});

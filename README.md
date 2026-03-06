@@ -406,6 +406,76 @@ The following demonstrates a complete LiDAR processing pipeline.
 - **Safe fan-out**: Multiple downstream steps can reference the same `step:X.Y` artifact without ambiguity
 - **Deterministic execution**: Workers know exactly which artifacts to consume and produce
 
+## on_exit hook
+
+A recipe can declare an optional `on_exit` step that runs after the job has been fully finalized — after all DAG steps have completed and all declared artifacts have been moved to their final storage destinations. It is not part of the DAG. Ordo validates it at recipe creation and validates its params at job creation. n8n reads it from the stored recipe definition when executing the finalization workflow.
+
+### When it runs
+
+After job completion and artifact finalization. The full artifact set is available: both initial inputs and all step outputs.
+
+### Declaring on_exit
+
+Add an `on_exit` object alongside the `recipe` array in the definition:
+
+```json
+{
+  "name": "my-pipeline",
+  "version": "1.0.0",
+  "definition": {
+    "recipe": [...],
+    "on_exit": {
+      "id": "notify",
+      "type": "SEND_WEBHOOK",
+      "inputs": {
+        "payload": "step:dem.output_dem"
+      },
+      "param_keys": ["webhook_url"]
+    }
+  }
+}
+```
+
+### Allowed fields
+
+| Field | Required | Description |
+|---|---|---|
+| `id` | yes | Unique identifier for this hook (used as the key in job `params`) |
+| `type` | yes | Executor type — must exist in `step_executor` |
+| `inputs` | yes | Slot → namespaced artifact ref, same rules as regular step inputs |
+| `param_keys` | no | Array of unique strings declaring required param names |
+
+### Prohibited fields
+
+- `outputs` — on_exit steps do not produce artifacts
+- `depends_on` — on_exit is not wired into the DAG graph
+
+### Input artifact references
+
+`inputs` follows the same namespaced ref rules as regular steps (`job:<name>` or `step:<stepId>.<slot>`). The on_exit step can reference any artifact available in the DAG — both initial job inputs and outputs produced by any step.
+
+### Supplying params at job creation
+
+Provide params for the on_exit step under `params[on_exit.id]` in the job creation request:
+
+```json
+{
+  "recipe_id": 1,
+  "inputs": { ... },
+  "params": {
+    "step1": { "resolution": 1 },
+    "notify": { "webhook_url": "https://example.com/hook" }
+  }
+}
+```
+
+### Example use cases
+
+- Post-job webhooks to notify downstream systems
+- Cache invalidation after artifact delivery
+- Search index updates after finalization
+- Triggering dependent pipelines
+
 ## Recipe Format
 
 The current recipe format requires typed output maps and namespaced artifact references. The legacy format (array outputs, bare artifact names, `required_params`) is no longer accepted — submitting it returns a validation error with migration instructions.
