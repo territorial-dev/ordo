@@ -1,3 +1,10 @@
+# [1.4.0](https://github.com/territorial-dev/ordo/compare/v1.3.0...v1.4.0) (2026-03-06)
+
+
+### Features
+
+* add on_exit lifecycle hook to recipes ([f9e1b81](https://github.com/territorial-dev/ordo/commit/f9e1b81f864071326cf9387b12bcd10c0e7a0cae))
+
 # [1.3.0](https://github.com/territorial-dev/ordo/compare/v1.2.1...v1.3.0) (2026-02-26)
 
 
