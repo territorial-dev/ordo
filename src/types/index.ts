@@ -6,8 +6,16 @@ export interface StepDefinition {
   param_keys?: string[];
 }
 
+export interface OnExitStep {
+  id: string;
+  type: string;
+  inputs: Record<string, string>; // slot name -> namespaced artifact ref
+  param_keys?: string[];
+}
+
 export interface RecipeDefinition {
   recipe: StepDefinition[];
+  on_exit?: OnExitStep;
 }
 
 export interface Recipe {

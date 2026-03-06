@@ -134,6 +134,20 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     }
   }
 
+  // Validate on_exit params
+  const onExit = recipe.definition.on_exit;
+  if (onExit) {
+    const requiredKeys = onExit.param_keys ?? [];
+    const provided = jobParams[onExit.id];
+    for (const paramName of requiredKeys) {
+      if (provided === undefined || !(paramName in provided)) {
+        throw new ValidationError(
+          `Missing required param "${paramName}" for on_exit step "${onExit.id}"`,
+        );
+      }
+    }
+  }
+
   // Begin transaction
   const client = await pool.connect();
   try {

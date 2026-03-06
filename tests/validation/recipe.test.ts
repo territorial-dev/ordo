@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { validateRecipe, ValidationError } from '../../src/utils/validation';
-import { executorMap, SINGLE_IO, DOUBLE_IN, NO_INPUT, NO_OUTPUT } from '../helpers/executors';
+import { executorMap, makeExecutor, SINGLE_IO, DOUBLE_IN, NO_INPUT, NO_OUTPUT } from '../helpers/executors';
 import { singleStepRecipe, linearChainRecipe, forkRecipe, joinRecipe, makeStep } from '../helpers/recipes';
 import { RecipeDefinition } from '../../src/types';
 
@@ -418,5 +418,106 @@ describe('param_keys validation', () => {
       ],
     } as unknown as RecipeDefinition;
     await expect(validateRecipe(recipe)).rejects.toThrow('param_keys must contain only strings');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// on_exit hook validation
+// ---------------------------------------------------------------------------
+
+describe('on_exit', () => {
+  /** Executor that accepts one metadata input and produces nothing */
+  const ON_EXIT_EXEC = makeExecutor('on-exit-webhook', { metadata: 'json' }, {});
+
+  it('passes when on_exit is absent', async () => {
+    withExecutors(SINGLE_IO);
+    await expect(validateRecipe(singleStepRecipe())).resolves.toBeUndefined();
+  });
+
+  it('rejects on_exit as an array', async () => {
+    withExecutors(SINGLE_IO);
+    const recipe = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      on_exit: [{ id: 'notify', type: 'on-exit-webhook', inputs: {} }],
+    } as unknown as RecipeDefinition;
+    await expect(validateRecipe(recipe)).rejects.toThrow('on_exit must be a single step object, not an array');
+  });
+
+  it('rejects on_exit with an outputs field', async () => {
+    withExecutors(SINGLE_IO, ON_EXIT_EXEC);
+    const recipe = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      on_exit: { id: 'notify', type: 'on-exit-webhook', inputs: {}, outputs: {} },
+    } as unknown as RecipeDefinition;
+    await expect(validateRecipe(recipe)).rejects.toThrow('on_exit step must not declare outputs');
+  });
+
+  it('rejects on_exit with a depends_on field', async () => {
+    withExecutors(SINGLE_IO, ON_EXIT_EXEC);
+    const recipe = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      on_exit: { id: 'notify', type: 'on-exit-webhook', inputs: {}, depends_on: ['step1'] },
+    } as unknown as RecipeDefinition;
+    await expect(validateRecipe(recipe)).rejects.toThrow('on_exit step must not declare depends_on');
+  });
+
+  it('rejects on_exit with an unknown type', async () => {
+    withExecutors(SINGLE_IO);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      on_exit: { id: 'notify', type: 'unknown-webhook', inputs: {} },
+    };
+    await expect(validateRecipe(recipe)).rejects.toThrow('Unsupported step type: unknown-webhook');
+  });
+
+  it('rejects on_exit with an invalid input slot (not in executor accepts)', async () => {
+    withExecutors(SINGLE_IO, ON_EXIT_EXEC);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      // metadata (required) is provided; bad_slot is extra and unknown
+      on_exit: { id: 'notify', type: 'on-exit-webhook', inputs: { metadata: 'step:step1.output', bad_slot: 'step:step1.output' } },
+    };
+    await expect(validateRecipe(recipe)).rejects.toThrow('has invalid input slot: bad_slot');
+  });
+
+  it('rejects on_exit input referencing an artifact not in the DAG', async () => {
+    withExecutors(SINGLE_IO, ON_EXIT_EXEC);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      on_exit: { id: 'notify', type: 'on-exit-webhook', inputs: { metadata: 'step:nonexistent.output' } },
+    };
+    await expect(validateRecipe(recipe)).rejects.toThrow('on_exit step input references unavailable artifact: step:nonexistent.output');
+  });
+
+  it('accepts on_exit referencing a step output that exists in the DAG', async () => {
+    withExecutors(SINGLE_IO, ON_EXIT_EXEC);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      on_exit: { id: 'notify', type: 'on-exit-webhook', inputs: { metadata: 'step:step1.output' } },
+    };
+    await expect(validateRecipe(recipe)).resolves.toBeUndefined();
+  });
+
+  it('accepts on_exit with no inputs when executor accepts none', async () => {
+    withExecutors(NO_INPUT);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('gen', 'no-input', {}, { out: 'step:gen.out' })],
+      on_exit: { id: 'notify', type: 'no-input', inputs: {} },
+    };
+    await expect(validateRecipe(recipe)).resolves.toBeUndefined();
+  });
+
+  it('accepts on_exit with valid param_keys', async () => {
+    withExecutors(SINGLE_IO, ON_EXIT_EXEC);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' })],
+      on_exit: {
+        id: 'notify',
+        type: 'on-exit-webhook',
+        inputs: { metadata: 'step:step1.output' },
+        param_keys: ['webhook_url', 'secret'],
+      },
+    };
+    await expect(validateRecipe(recipe)).resolves.toBeUndefined();
   });
 });
