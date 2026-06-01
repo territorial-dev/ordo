@@ -85,6 +85,7 @@ Each step in the `recipe` array has:
 | `inputs` | object | yes | Slot name → namespaced artifact reference |
 | `outputs` | object | yes | Slot name → namespaced artifact name |
 | `param_keys` | array | no | Names of parameters required at job creation |
+| `max_concurrency` | integer | no | Maximum number of simultaneous instances of this step across all jobs. Must be ≥ 1. Enforced by n8n's lock mechanism; Ordo stores and exposes the value. |
 
 ### Minimal Valid Recipe
 
@@ -284,7 +285,57 @@ Job creation for this recipe:
 
 ---
 
-## 6. Job Outputs
+## 6. Concurrency Control
+
+### What max_concurrency Does
+
+Some steps are resource-intensive — GPU workloads, large memory allocations, licensed software with seat limits. Running too many of them in parallel can exhaust capacity or degrade results.
+
+`max_concurrency` is an optional integer on a recipe step that caps how many instances of that step may run simultaneously across all active jobs. A value of `2` means at most two workers may be executing that step at any given time.
+
+This is a **hint to the execution engine**, not an Ordo-enforced constraint. Ordo validates the value at recipe creation and stores it on each `job_step` row at job creation. Enforcement is the responsibility of n8n's step-claiming logic.
+
+### Setting max_concurrency
+
+Add it to any step that needs a cap:
+
+```json
+{
+  "id": "dem",
+  "type": "GENERATE_DEM",
+  "param_keys": ["resolution"],
+  "max_concurrency": 2,
+  "inputs": {
+    "input_las": "step:reproject.output_las"
+  },
+  "outputs": {
+    "output_dem": "step:dem.output_dem"
+  }
+}
+```
+
+Rules:
+- Must be a positive integer (≥ 1)
+- `0`, negative values, and floats are rejected at recipe validation
+- Omitting the field means no cap (n8n will claim the step freely)
+
+### Per-Step, Not Per-Recipe
+
+Different steps in the same recipe can have different caps, or none at all:
+
+```json
+"recipe": [
+  { "id": "reproject", "type": "REPROJECT_LAS", ... },
+  { "id": "dem",       "type": "GENERATE_DEM", "max_concurrency": 2, ... },
+  { "id": "ept",       "type": "BUILD_EPT",    "max_concurrency": 1, ... }
+]
+```
+
+Here `reproject` runs freely, `dem` is capped at 2, and `ept` runs exclusively one at a time across all jobs.
+
+---
+
+## 7. Job Outputs
 
 ### What Job Outputs Are
 
@@ -317,7 +368,7 @@ This separation means:
 
 ---
 
-## 7. The step_executor Table
+## 8. The step_executor Table
 
 The `step_executor` table is where you register the step types your pipeline can use. Every `type` field in a recipe must have a corresponding row here, or validation will fail.
 
@@ -372,7 +423,7 @@ This contract enforcement prevents silent misconfigurations. If an executor chan
 
 ---
 
-## 8. Designing a New Step
+## 9. Designing a New Step
 
 Use this checklist when adding a new step type to your system.
 
@@ -429,7 +480,7 @@ Once registered, the step type can be used in any recipe.
 
 ---
 
-## 9. Best Practices
+## 10. Best Practices
 
 ### Use Stable Step IDs
 
@@ -472,7 +523,7 @@ Do not create a new version for:
 
 ---
 
-## 10. Common Mistakes
+## 11. Common Mistakes
 
 ### Unnamespaced Artifact References
 
@@ -528,7 +579,7 @@ If you change an executor's slot names or add/remove slots without updating the 
 
 ---
 
-## 11. Full Example Pipeline
+## 12. Full Example Pipeline
 
 This example defines a complete LiDAR processing pipeline that reprojects a point cloud and generates three derivative products in parallel.
 

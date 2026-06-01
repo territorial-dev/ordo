@@ -82,6 +82,20 @@ This ensures:
 - multiple workers can run safely
 - no step is executed twice
 
+### Concurrency control
+
+Some steps declare a `max_concurrency` value in their recipe definition. This integer is stored in the `max_concurrency` column of `job_step` at job creation time. A `NULL` value means the step is unconstrained.
+
+When `max_concurrency` is set, the Job Runner must enforce the cap before claiming a step. The recommended approach is an advisory lock or a count-then-claim pattern:
+
+1. Count how many `job_step` rows with the same `step_type` currently have `status = 'running'`.
+2. If the count is already at or above `max_concurrency`, skip the step (leave it pending for a later poll cycle).
+3. If below the cap, proceed with the atomic claim using `FOR UPDATE SKIP LOCKED`.
+
+Because `max_concurrency` is denormalized directly onto `job_step`, no join to the recipe is needed. The cap is readable from the row being claimed.
+
+The concurrency check and the claim must be performed inside a single transaction to avoid race conditions between workers.
+
 ### Input resolution
 
 Inputs are resolved using explicit slot bindings defined in the recipe:
