@@ -274,6 +274,18 @@ const validateStep = (step: StepDefinition): void => {
       seen.add(k);
     }
   }
+
+  if (step.max_concurrency !== undefined) {
+    if (
+      typeof step.max_concurrency !== 'number' ||
+      !Number.isInteger(step.max_concurrency) ||
+      step.max_concurrency < 1
+    ) {
+      throw new ValidationError(
+        `Step "${step.id}" max_concurrency must be a positive integer (>= 1)`
+      );
+    }
+  }
 };
 
 const validateOnExitStep = (step: OnExitStep | any): void => {

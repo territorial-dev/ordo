@@ -422,6 +422,77 @@ describe('param_keys validation', () => {
 });
 
 // ---------------------------------------------------------------------------
+// max_concurrency validation
+// ---------------------------------------------------------------------------
+
+describe('max_concurrency validation', () => {
+  it('accepts a step with a valid max_concurrency', async () => {
+    withExecutors(SINGLE_IO);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' }, undefined, 3)],
+    };
+    await expect(validateRecipe(recipe)).resolves.toBeUndefined();
+  });
+
+  it('accepts max_concurrency of 1 (minimum valid value)', async () => {
+    withExecutors(SINGLE_IO);
+    const recipe: RecipeDefinition = {
+      recipe: [makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' }, undefined, 1)],
+    };
+    await expect(validateRecipe(recipe)).resolves.toBeUndefined();
+  });
+
+  it('accepts a step without max_concurrency (no regression)', async () => {
+    withExecutors(SINGLE_IO);
+    await expect(validateRecipe(singleStepRecipe())).resolves.toBeUndefined();
+  });
+
+  it('rejects max_concurrency of 0', async () => {
+    const recipe = {
+      recipe: [{
+        id: 'step1', type: 'single-io',
+        inputs: { input: 'job:raw' }, outputs: { output: 'step:step1.output' },
+        max_concurrency: 0,
+      }],
+    } as unknown as RecipeDefinition;
+    await expect(validateRecipe(recipe)).rejects.toThrow('positive integer');
+  });
+
+  it('rejects a negative max_concurrency', async () => {
+    const recipe = {
+      recipe: [{
+        id: 'step1', type: 'single-io',
+        inputs: { input: 'job:raw' }, outputs: { output: 'step:step1.output' },
+        max_concurrency: -1,
+      }],
+    } as unknown as RecipeDefinition;
+    await expect(validateRecipe(recipe)).rejects.toThrow('positive integer');
+  });
+
+  it('rejects a float max_concurrency', async () => {
+    const recipe = {
+      recipe: [{
+        id: 'step1', type: 'single-io',
+        inputs: { input: 'job:raw' }, outputs: { output: 'step:step1.output' },
+        max_concurrency: 1.5,
+      }],
+    } as unknown as RecipeDefinition;
+    await expect(validateRecipe(recipe)).rejects.toThrow('positive integer');
+  });
+
+  it('rejects a string max_concurrency (runtime guard)', async () => {
+    const recipe = {
+      recipe: [{
+        id: 'step1', type: 'single-io',
+        inputs: { input: 'job:raw' }, outputs: { output: 'step:step1.output' },
+        max_concurrency: '3',
+      }],
+    } as unknown as RecipeDefinition;
+    await expect(validateRecipe(recipe)).rejects.toThrow('positive integer');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // on_exit hook validation
 // ---------------------------------------------------------------------------
 

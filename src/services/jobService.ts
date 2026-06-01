@@ -195,9 +195,9 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     for (const step of recipeSteps) {
       await client.query(
         `INSERT INTO ${schema}.job_step
-         (job_id, step_id, step_type, status, attempt)
-         VALUES ($1, $2, $3, 'pending', 0)`,
-        [jobId, step.id, step.type],
+         (job_id, step_id, step_type, status, attempt, max_concurrency)
+         VALUES ($1, $2, $3, 'pending', 0, $4)`,
+        [jobId, step.id, step.type, step.max_concurrency ?? null],
       );
     }
 
@@ -255,7 +255,7 @@ export const getJobStatus = async (
   // Get steps
   const stepsResult = await pool.query(
     `SELECT job_id, step_id, step_type, status, attempt, claimed_by, claimed_at,
-            started_at, finished_at, error
+            started_at, finished_at, error, max_concurrency
      FROM ${schema}.job_step
      WHERE job_id = $1
      ORDER BY step_id`,
@@ -273,6 +273,7 @@ export const getJobStatus = async (
     started_at: row.started_at,
     finished_at: row.finished_at,
     error: row.error,
+    max_concurrency: row.max_concurrency,
   }));
 
   // Get artifacts
@@ -366,7 +367,7 @@ export const getJobsBatch = async (
 
   const stepsResult = await pool.query(
     `SELECT job_id, step_id, step_type, status, attempt, claimed_by, claimed_at,
-            started_at, finished_at, error
+            started_at, finished_at, error, max_concurrency
      FROM ${schema}.job_step
      WHERE job_id = ANY($1::int[])
      ORDER BY job_id, step_id`,
@@ -403,6 +404,7 @@ export const getJobsBatch = async (
       started_at: row.started_at,
       finished_at: row.finished_at,
       error: row.error,
+      max_concurrency: row.max_concurrency,
     });
   }
 

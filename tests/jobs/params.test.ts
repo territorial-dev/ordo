@@ -173,6 +173,17 @@ describe('job param validation', () => {
       }),
     ).resolves.toBeTypeOf('number');
   });
+
+  it('succeeds when a step declares max_concurrency', async () => {
+    const recipe = makeRecipe([
+      makeStep('step1', 'single-io', { input: 'job:raw' }, { output: 'step:step1.output' }, undefined, 4),
+    ]);
+    mockGetRecipe.mockResolvedValue(recipe);
+
+    await expect(
+      createJob({ recipe_id: 1, inputs: singleInput }),
+    ).resolves.toBeTypeOf('number');
+  });
 });
 
 // ---------------------------------------------------------------------------

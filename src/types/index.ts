@@ -4,6 +4,7 @@ export interface StepDefinition {
   inputs: Record<string, string>;  // slot name -> namespaced artifact name (job:<n> or step:<id>.<slot>)
   outputs: Record<string, string>; // slot name -> namespaced artifact name (step:<id>.<slot>)
   param_keys?: string[];
+  max_concurrency?: number;
 }
 
 export interface OnExitStep {
@@ -48,6 +49,7 @@ export interface JobStep {
   started_at: Date | null;
   finished_at: Date | null;
   error: string | null;
+  max_concurrency: number | null;
 }
 
 export interface JobArtifact {

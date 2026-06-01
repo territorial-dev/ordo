@@ -6,8 +6,13 @@ export function makeStep(
   inputs: Record<string, string>,
   outputs: Record<string, string>,
   param_keys?: string[],
+  max_concurrency?: number,
 ): StepDefinition {
-  return { id, type, inputs, outputs, ...(param_keys ? { param_keys } : {}) };
+  return {
+    id, type, inputs, outputs,
+    ...(param_keys ? { param_keys } : {}),
+    ...(max_concurrency !== undefined ? { max_concurrency } : {}),
+  };
 }
 
 /** Single-step recipe: consumes one job input, produces one artifact */
