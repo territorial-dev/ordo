@@ -1,3 +1,10 @@
+# [1.5.0](https://github.com/territorial-dev/ordo/compare/v1.4.0...v1.5.0) (2026-06-01)
+
+
+### Features
+
+* added max_concurrency ([ed0eb6a](https://github.com/territorial-dev/ordo/commit/ed0eb6a25e4a31509162f2fcd6b3ce3a654a0909))
+
 # [1.4.0](https://github.com/territorial-dev/ordo/compare/v1.3.0...v1.4.0) (2026-03-06)
 
 
