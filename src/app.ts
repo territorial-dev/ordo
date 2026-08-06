@@ -36,6 +36,10 @@ import {
   getOutputHandler,
 } from "./controllers/outputController";
 import { listExecutorsHandler } from "./controllers/executorController";
+import {
+  listJobStepDetailingHandler,
+  getJobStepDetailingHandler,
+} from "./controllers/jobStepDetailingController";
 import { closePool } from "./db/connection";
 import { runMigrations } from "./db/migrations";
 import { version } from "../package.json";
@@ -86,6 +90,10 @@ app.get("/outputs/:id", getOutputHandler);
 
 // Executor endpoints
 app.get("/executors", listExecutorsHandler);
+
+// Job step detailing endpoints (read-only; written directly by n8n)
+app.get("/detailing", listJobStepDetailingHandler);
+app.get("/detailing/:id", getJobStepDetailingHandler);
 
 // Error handling middleware
 app.use(

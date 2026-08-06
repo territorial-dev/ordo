@@ -70,6 +70,14 @@ export interface JobOutput {
   created_at: Date;
 }
 
+export interface JobStepDetailing {
+  job_id: number;
+  step_id: string;
+  log: string | null;
+  progress: Record<string, any> | null;
+  updated_at: Date;
+}
+
 export interface CreateRecipeRequest {
   name: string;
   version: string;
