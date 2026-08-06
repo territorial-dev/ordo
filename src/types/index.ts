@@ -71,6 +71,7 @@ export interface JobOutput {
 }
 
 export interface JobStepDetailing {
+  id: number;
   job_id: number;
   step_id: string;
   log: string | null;

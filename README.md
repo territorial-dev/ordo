@@ -282,6 +282,31 @@ The response will be an array of objects instead of a single object:
 ```
 
 
+### GET /detailing
+
+List step detailing entries (logs/progress) written directly by n8n as steps execute. Read-only — there is no write endpoint; n8n writes to `job_step_detailing` directly.
+
+**Query parameters (all optional, combinable):**
+- `job_id`: filter to a specific job
+- `step_id`: filter to a specific step
+
+Results are always ordered by `updated_at` descending (most recent first). Multiple rows may exist per `(job_id, step_id)` since it's an append-only log.
+
+**Response:**
+
+```json
+[
+  {
+    "id": 1,
+    "job_id": 1,
+    "step_id": "reproject",
+    "log": "starting reprojection...",
+    "progress": { "percent": 10 },
+    "updated_at": "2024-01-01T00:00:00Z"
+  }
+]
+```
+
 ### GET /health
 
 Health check endpoint (no authentication required).
