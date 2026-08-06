@@ -1,3 +1,10 @@
+# [1.6.0](https://github.com/territorial-dev/ordo/compare/v1.5.0...v1.6.0) (2026-08-06)
+
+
+### Features
+
+* add read-only GET endpoints for job_step_detailing ([89fea5c](https://github.com/territorial-dev/ordo/commit/89fea5c2842e9ef4f2dc03b67e28fde53e6dc562))
+
 # [1.5.0](https://github.com/territorial-dev/ordo/compare/v1.4.0...v1.5.0) (2026-06-01)
 
 
