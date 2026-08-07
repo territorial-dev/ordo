@@ -227,7 +227,7 @@ Job-level outputs declare which artifacts should be finalized after a job comple
 
 ### GET /jobs/:id
 
-Get job status, steps, and artifacts.
+Get job status, progress, steps, and artifacts.
 
 **Response:**
 
@@ -243,10 +243,35 @@ Get job status, steps, and artifacts.
     "error": null,
     "params": {}
   },
-  "steps": [...],
+  "progress": {
+    "percentage": 0.55,
+    "completed_steps": 1,
+    "total_steps": 3
+  },
+  "steps": [
+    {
+      "job_id": 1,
+      "step_id": "reproject",
+      "step_type": "REPROJECT_LAS",
+      "status": "running",
+      "...": "...",
+      "last_detailing": {
+        "id": 42,
+        "job_id": 1,
+        "step_id": "reproject",
+        "log": "Processed tile 22 of 34",
+        "progress": { "progress": 65 },
+        "updated_at": "2024-01-01T00:05:00Z"
+      }
+    }
+  ],
   "artifacts": [...]
 }
 ```
+
+`progress.percentage` is a fraction in `[0, 1]`, averaged across all steps: a `success` step contributes `1`, a `pending`/`failed`/`skipped` step contributes `0`, and a `running` step contributes its live progress from `job_step_detailing` (0 if no detailing row has been written for it yet). For example, one completed step, one running step reporting 65%, and one not-yet-started step yields `(100 + 65 + 0) / (3 * 100) = 0.55`. `completed_steps`/`total_steps` count steps that have reached `success` or `failed`.
+
+`steps[].last_detailing` is the most recent (`updated_at`) `job_step_detailing` row for that step, or `null` if n8n hasn't written one yet. See `GET /detailing` for the full log.
 
 You can also query by an array of IDs, for example: `/jobs/1,2,3`
 
@@ -290,7 +315,7 @@ List step detailing entries (logs/progress) written directly by n8n as steps exe
 - `job_id`: filter to a specific job
 - `step_id`: filter to a specific step
 
-Results are always ordered by `updated_at` descending (most recent first). Multiple rows may exist per `(job_id, step_id)` since it's an append-only log.
+Results are always ordered by `updated_at` descending (most recent first). Multiple rows may exist per `(job_id, step_id)` since it's an append-only log. The latest row per step is also surfaced inline on `GET /jobs/:id` as `steps[].last_detailing`.
 
 **Response:**
 

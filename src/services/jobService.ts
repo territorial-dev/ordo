@@ -12,7 +12,12 @@ import {
   createRecipe,
   getRecipeByNameAndVersion,
 } from "./recipeService";
+import {
+  getLatestDetailingByStep,
+  getLatestDetailingByStepBatch,
+} from "./jobStepDetailingService";
 import { ValidationError } from "../utils/validation";
+import { computeJobProgressPercentage } from "../utils/progress";
 
 export const createJob = async (req: CreateJobRequest): Promise<number> => {
   const pool = getPool();
@@ -262,6 +267,8 @@ export const getJobStatus = async (
     [jobId]
   );
 
+  const detailingByStep = await getLatestDetailingByStep(jobId);
+
   const steps: JobStep[] = stepsResult.rows.map((row) => ({
     job_id: row.job_id,
     step_id: row.step_id,
@@ -274,6 +281,7 @@ export const getJobStatus = async (
     finished_at: row.finished_at,
     error: row.error,
     max_concurrency: row.max_concurrency,
+    last_detailing: detailingByStep.get(row.step_id) ?? null,
   }));
 
   // Get artifacts
@@ -318,7 +326,7 @@ export const getJobStatus = async (
   ).length;
   const total_steps = steps.length;
   const progress = {
-    percentage: total_steps > 0 ? completed_steps / total_steps : 0,
+    percentage: computeJobProgressPercentage(steps),
     completed_steps,
     total_steps,
   };
@@ -390,6 +398,8 @@ export const getJobsBatch = async (
     [jobIds]
   );
 
+  const detailingByJob = await getLatestDetailingByStepBatch(jobIds);
+
   const stepsByJob = new Map<number, JobStep[]>();
   for (const row of stepsResult.rows) {
     if (!stepsByJob.has(row.job_id)) stepsByJob.set(row.job_id, []);
@@ -405,6 +415,7 @@ export const getJobsBatch = async (
       finished_at: row.finished_at,
       error: row.error,
       max_concurrency: row.max_concurrency,
+      last_detailing: detailingByJob.get(row.job_id)?.get(row.step_id) ?? null,
     });
   }
 
@@ -457,7 +468,7 @@ export const getJobsBatch = async (
     ).length;
     const total_steps = steps.length;
     const progress = {
-      percentage: total_steps > 0 ? completed_steps / total_steps : 0,
+      percentage: computeJobProgressPercentage(steps),
       completed_steps,
       total_steps,
     };

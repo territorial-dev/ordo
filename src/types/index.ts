@@ -50,6 +50,8 @@ export interface JobStep {
   finished_at: Date | null;
   error: string | null;
   max_concurrency: number | null;
+  /** Most recent job_step_detailing row for this step (by updated_at), or null if none exists. */
+  last_detailing: JobStepDetailing | null;
 }
 
 export interface JobArtifact {
