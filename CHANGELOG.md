@@ -1,3 +1,10 @@
+# [1.7.0](https://github.com/territorial-dev/ordo/compare/v1.6.0...v1.7.0) (2026-08-07)
+
+
+### Features
+
+* improved progress and job detailing on /jobs/[id] ([7b85a87](https://github.com/territorial-dev/ordo/commit/7b85a877960bf66aba201d2ee1633ed6136df96f))
+
 # [1.6.0](https://github.com/territorial-dev/ordo/compare/v1.5.0...v1.6.0) (2026-08-06)
 
 
