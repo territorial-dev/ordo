@@ -69,6 +69,9 @@ export interface JobOutput {
   job_id: number;
   artifact_name: string;
   path: string;
+  /** Object key the finalizer actually wrote (a prefix ending in "/" for folder artifacts); null until delivered. */
+  delivered_uri: string | null;
+  delivered_at: Date | null;
   created_at: Date;
 }
 

@@ -306,7 +306,7 @@ export const getJobStatus = async (
 
   // Get outputs
   const outputsResult = await pool.query(
-    `SELECT job_id, artifact_name, path, created_at
+    `SELECT job_id, artifact_name, path, delivered_uri, delivered_at, created_at
      FROM ${schema}.job_output
      WHERE job_id = $1
      ORDER BY artifact_name`,
@@ -317,6 +317,8 @@ export const getJobStatus = async (
     job_id: row.job_id,
     artifact_name: row.artifact_name,
     path: row.path,
+    delivered_uri: row.delivered_uri,
+    delivered_at: row.delivered_at,
     created_at: row.created_at,
   }));
 
@@ -391,7 +393,7 @@ export const getJobsBatch = async (
   );
 
   const outputsResult = await pool.query(
-    `SELECT job_id, artifact_name, path, created_at
+    `SELECT job_id, artifact_name, path, delivered_uri, delivered_at, created_at
      FROM ${schema}.job_output
      WHERE job_id = ANY($1::int[])
      ORDER BY job_id, artifact_name`,
@@ -441,6 +443,8 @@ export const getJobsBatch = async (
       job_id: row.job_id,
       artifact_name: row.artifact_name,
       path: row.path,
+      delivered_uri: row.delivered_uri,
+      delivered_at: row.delivered_at,
       created_at: row.created_at,
     });
   }

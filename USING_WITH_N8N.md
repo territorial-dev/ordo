@@ -186,6 +186,9 @@ For each declared output that exists:
 
 - copy the artifact from staging to the final path
 - mark the artifact as stable (no TTL)
+- record the key actually written in `job_output.delivered_uri` (and `delivered_at = now()`), before the job is marked `success` and any `on_exit` hook runs. For a folder artifact, record the prefix with a trailing `/`
+
+`job_output.path` keeps the destination the caller requested. `delivered_uri` is the only place consumers can read where the bytes landed. It stays `null` until the output is delivered.
 
 All copies must be:
 

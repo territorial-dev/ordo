@@ -23,7 +23,7 @@ export const listOutputs = async (
   const pool = getPool();
   const schema = getSchema();
 
-  let query = `SELECT job_id, artifact_name, path, created_at
+  let query = `SELECT job_id, artifact_name, path, delivered_uri, delivered_at, created_at
    FROM ${schema}.job_output`;
   const params: number[] = [];
   if (jobId !== undefined) {
@@ -38,6 +38,8 @@ export const listOutputs = async (
     job_id: row.job_id,
     artifact_name: row.artifact_name,
     path: row.path,
+    delivered_uri: row.delivered_uri,
+    delivered_at: row.delivered_at,
     created_at: row.created_at,
   }));
 };
@@ -49,7 +51,7 @@ export const getOutput = async (
   const pool = getPool();
   const schema = getSchema();
   const result = await pool.query(
-    `SELECT job_id, artifact_name, path, created_at
+    `SELECT job_id, artifact_name, path, delivered_uri, delivered_at, created_at
      FROM ${schema}.job_output
      WHERE job_id = $1 AND artifact_name = $2`,
     [jobId, artifactName],
@@ -61,6 +63,8 @@ export const getOutput = async (
     job_id: row.job_id,
     artifact_name: row.artifact_name,
     path: row.path,
+    delivered_uri: row.delivered_uri,
+    delivered_at: row.delivered_at,
     created_at: row.created_at,
   };
 };
