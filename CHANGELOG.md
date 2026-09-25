@@ -1,3 +1,10 @@
+# [1.8.0](https://github.com/territorial-dev/ordo/compare/v1.7.0...v1.8.0) (2026-09-25)
+
+
+### Features
+
+* record delivered object key on job_output ([1234273](https://github.com/territorial-dev/ordo/commit/1234273c64bbf44f8a1dc91061a480cc773c44e5))
+
 # [1.7.0](https://github.com/territorial-dev/ordo/compare/v1.6.0...v1.7.0) (2026-08-07)
 
 
