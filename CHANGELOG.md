@@ -1,3 +1,10 @@
+# [1.9.0](https://github.com/territorial-dev/ordo/compare/v1.8.0...v1.9.0) (2026-10-20)
+
+
+### Features
+
+* leased runner API, API keys with roles, idempotent jobs, capability matching ([d7d4d65](https://github.com/territorial-dev/ordo/commit/d7d4d65a145ba2415f268a287c8fa278cde947dd))
+
 # [1.8.0](https://github.com/territorial-dev/ordo/compare/v1.7.0...v1.8.0) (2026-09-25)
 
 
