@@ -103,8 +103,13 @@ export const createJobHandler = async (
       }
     }
 
-    const jobId = await createJob(body);
-    res.status(201).json({ id: jobId });
+    if (body.idempotency_key !== undefined && (typeof body.idempotency_key !== "string" || !body.idempotency_key)) {
+      res.status(400).json({ error: "idempotency_key must be a non-empty string" });
+      return;
+    }
+
+    const { id, created } = await createJob(body, req.auth?.keyId ?? null);
+    res.status(created ? 201 : 200).json({ id, created });
   } catch (error) {
     if (error instanceof ValidationError) {
       res.status(400).json({ error: error.message });
@@ -120,11 +125,18 @@ export const createJobHandler = async (
 };
 
 export const listJobsHandler = async (
-  _req: Request,
+  req: Request,
   res: Response,
 ): Promise<void> => {
   try {
-    const jobs = await listJobs();
+    const filter: { idempotency_key?: string; status?: string } = {};
+    if (req.query.idempotency_key !== undefined) {
+      filter.idempotency_key = String(req.query.idempotency_key);
+    }
+    if (req.query.status !== undefined) {
+      filter.status = String(req.query.status);
+    }
+    const jobs = await listJobs(filter);
     res.json(jobs);
   } catch (error) {
     console.error("Error listing jobs:", error);

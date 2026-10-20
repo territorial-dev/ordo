@@ -85,7 +85,10 @@ Each step in the `recipe` array has:
 | `inputs` | object | yes | Slot name → namespaced artifact reference |
 | `outputs` | object | yes | Slot name → namespaced artifact name |
 | `param_keys` | array | no | Names of parameters required at job creation |
-| `max_concurrency` | integer | no | Maximum number of simultaneous instances of this step across all jobs. Must be ≥ 1. Enforced by n8n's lock mechanism; Ordo stores and exposes the value. |
+| `max_concurrency` | integer | no | Maximum number of simultaneous instances of this step across all jobs. Must be ≥ 1. Enforced by the runner API on claim and by n8n's lock mechanism. |
+| `max_attempts` | integer | no | Overrides the executor's default for runner-API steps: how many claims a step gets before it fails. Must be ≥ 1. |
+| `lease_seconds` | integer | no | Overrides the executor's default lease length for runner-API steps. Must be ≥ 1. |
+| `requires` | object | no | Overrides the executor's capability requirements for this step (flat object, see the README's runner API section). |
 
 ### Minimal Valid Recipe
 
@@ -371,6 +374,8 @@ This separation means:
 ## 8. The step_executor Table
 
 The `step_executor` table is where you register the step types your pipeline can use. Every `type` field in a recipe must have a corresponding row here, or validation will fail.
+
+Rows can be registered over the API with `PUT /step-executors/:step_type` (see the README); the SQL below is equivalent. Each row also carries `runner` (`n8n` or `api`), `executor_ref` (the workflow name for n8n, the runner entrypoint for api; `n8n_workflow` is a deprecated alias kept in sync by trigger), `requires`, `max_attempts` and `lease_seconds`.
 
 ### Schema
 

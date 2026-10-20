@@ -98,7 +98,7 @@ describe('job input artifact validation', () => {
 
     await expect(
       createJob({ recipe_id: 1, inputs: { 'job:raw': artifact() } }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('rejects when a required initial input is missing', async () => {
@@ -143,7 +143,7 @@ describe('job input artifact validation', () => {
           'job:mesh': artifact('mesh'),
         },
       }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('rejects when one of multiple required inputs is missing', async () => {
@@ -171,7 +171,7 @@ describe('job input artifact validation', () => {
     // Only 'job:raw' should be required — step:step1.output is internal
     await expect(
       createJob({ recipe_id: 1, inputs: { 'job:raw': artifact() } }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('rejects when an internal artifact is provided as if it were a job input', async () => {

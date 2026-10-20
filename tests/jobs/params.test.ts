@@ -83,7 +83,7 @@ describe('job param validation', () => {
         inputs: singleInput,
         params: { step1: { threshold: 0.5 } },
       }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('rejects when a required param is missing', async () => {
@@ -139,7 +139,7 @@ describe('job param validation', () => {
 
     await expect(
       createJob({ recipe_id: 1, inputs: singleInput }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('enforces param_keys isolation: missing param on second step is caught', async () => {
@@ -171,7 +171,7 @@ describe('job param validation', () => {
         inputs: singleInput,
         params: { step1: { required: 'yes', extra: 'ignored' } },
       }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('succeeds when a step declares max_concurrency', async () => {
@@ -182,7 +182,7 @@ describe('job param validation', () => {
 
     await expect(
       createJob({ recipe_id: 1, inputs: singleInput }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 });
 
@@ -253,7 +253,7 @@ describe('on_exit param validation', () => {
         inputs: singleInput,
         params: { notify: { webhook_url: 'https://example.com' } },
       }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('succeeds when on_exit has no param_keys and no params are supplied', async () => {
@@ -264,6 +264,6 @@ describe('on_exit param validation', () => {
 
     await expect(
       createJob({ recipe_id: 1, inputs: singleInput }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 });

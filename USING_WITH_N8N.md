@@ -75,7 +75,10 @@ The workflow starts by atomically claiming a runnable step:
 
 - status is pending or blocked
 - no unmet cooldown (blocked_until)
+- its executor has `runner = 'n8n'` (join `step_executor`); steps of `api` executors belong to HTTP runners and must be left alone
 - row is locked using `FOR UPDATE SKIP LOCKED`
+
+The executor's workflow name is `step_executor.executor_ref`. The old `n8n_workflow` column still exists and is kept equal to `executor_ref` by a database trigger for `n8n` rows, so existing workflows that read it keep working; it is deprecated and will be dropped in a future major. Steps claimed by n8n have a null `lease_token`, so Ordo's lease sweeper never touches them.
 
 This ensures:
 

@@ -67,6 +67,7 @@ API_TOKEN=your-secret-token-here
 DATABASE_URL=postgresql://user:password@localhost:5432/ordo
 DB_SCHEMA=ordo
 PORT=3000
+SWEEPER_INTERVAL_SECONDS=60
 ```
 
 `DB_SCHEMA` defaults to `ordo` when unset or empty. Ordo runs migrations on startup and creates the schema and tables if they do not exist.
@@ -91,7 +92,15 @@ npm run dev
 
 ## API Endpoints
 
-All endpoints (except `/health`) require Bearer token authentication via the `Authorization` header.
+All endpoints (except `/health`) require Bearer token authentication via the `Authorization` header. The environment `API_TOKEN` is the installation's admin key. Other keys are issued through `POST /keys` and carry a role:
+
+| Role | Holder | May |
+|---|---|---|
+| `admin` | Humans, `API_TOKEN` | Everything, including key management |
+| `scheduler` | A job factory (for example Ara's scheduler) | Create jobs and recipes, read everything, upsert `api`-runner executors |
+| `runner` | A worker claiming steps over HTTP | `/runner/*` and `GET /jobs/:id` |
+
+Requests with a valid key but the wrong role get `403`.
 
 ### POST /recipes
 
@@ -209,14 +218,18 @@ Create a job from a recipe.
 - `inputs` (required): Object mapping artifact names to artifact metadata (type, uri, hash, optional metadata)
 - `outputs` (optional): Object mapping artifact names to final destination paths. All artifact names must be producible by the recipe DAG.
 - `params` (optional): Object mapping step IDs to param objects (param name → value). Supplies concrete parameter values for steps that declare `required_params` in the recipe. Parameter values are not part of recipe identity and do not affect recipe versioning.
+- `idempotency_key` (optional): A string unique per job. Creating a job twice with the same key yields one job: the first call returns `201` with `created: true`, every repeat returns `200` with the existing id and `created: false`. Two callers racing on the same key both get the same id. Jobs without a key behave as before.
 
 **Response:**
 
 ```json
 {
-  "id": 1
+  "id": 1,
+  "created": true
 }
 ```
+
+`GET /jobs?idempotency_key=<key>` looks a job up by key (an indexed lookup; returns an array with zero or one job). `GET /jobs?status=<status>` filters by job status.
 
 **Job-Level Outputs:**
 
@@ -335,6 +348,97 @@ Results are always ordered by `updated_at` descending (most recent first). Multi
 ### GET /health
 
 Health check endpoint (no authentication required).
+
+### PUT /step-executors/:step_type
+
+Insert or update a step executor. `201` when created, `200` when updated; the body echoes the stored row plus `created`.
+
+```json
+{
+  "runner": "api",
+  "executor_ref": "ara.steps.ingest_ecmwf",
+  "accepts": {},
+  "produces": { "zarr": "zarr" },
+  "requires": { "tags": ["gdal"] },
+  "max_attempts": 3,
+  "lease_seconds": 600,
+  "description": "optional",
+  "params": null
+}
+```
+
+- `runner`: `n8n` (default) or `api`. The `scheduler` role may only upsert `api` rows; `admin` may upsert both.
+- `executor_ref`: for `n8n` rows the workflow name (the deprecated `n8n_workflow` field is accepted as an alias and returned too); for `api` rows the runner's entrypoint.
+- `requires`: capability requirements matched against a runner's `capabilities` on claim (see below). `max_attempts` and `lease_seconds` are defaults that recipe steps may override.
+
+`GET /executors` returns these fields as well (`runner`, `executor_ref`, `n8n_workflow`, `requires`, `max_attempts`, `lease_seconds`).
+
+### Keys (`admin` only)
+
+- `POST /keys` with `{ "name": "garage-01", "role": "runner" }` returns `201` with the key in `key`, shown once; only its hash is stored.
+- `GET /keys` lists keys (`id`, `name`, `role`, `created_at`, `revoked_at`, `last_used_at`).
+- `DELETE /keys/:id` revokes a key; a revoked key gets `401` from then on.
+
+## Runner API
+
+Workers that execute steps over HTTP instead of reading Postgres directly. All routes are under `/runner` and require the `runner` role. A claim returns a lease; every later call on that step must present the lease token, so a worker whose lease was swept and reclaimed cannot complete a step it no longer owns. Only executors with `runner = 'api'` are ever claimed here; `n8n` steps are untouched.
+
+### `POST /runner/claim`
+
+```json
+{
+  "worker_id": "garage-01",
+  "capabilities": { "cpu": 8, "mem_gb": 32, "gpu": false, "tags": ["gdal", "region=br"], "ara_version": "0.3.1" },
+  "step_types": ["INGEST_ECMWF", "ZONAL"],
+  "lease_seconds": 300
+}
+```
+
+Ordo picks one step, atomically (`FOR UPDATE SKIP LOCKED`), that is `pending` or `blocked` with `blocked_until` passed, whose job is still open, whose executor has `runner = 'api'`, whose upstream steps have all succeeded, whose `requires` matches the capabilities, and whose `max_concurrency` is not exhausted. `step_types` is optional and narrows the claim. The step becomes `running` with the attempt counter advanced, and the job becomes `running` if it was pending. Response `200`:
+
+```json
+{
+  "job_id": 812, "step_id": "ingest", "step_type": "INGEST_ECMWF", "attempt": 1,
+  "lease_token": "…", "lease_expires_at": "2026-10-19T12:05:00Z", "lease_seconds": 300,
+  "executor_ref": "ara.steps.ingest_ecmwf",
+  "inputs": { "index": { "type": "json", "uri": "s3://…", "hash": "…", "metadata": null } },
+  "params": { "run": "2026-10-19T00" },
+  "job": { "id": 812, "idempotency_key": "ingest_ecmwf:20261019T00Z:oper:1.0.0", "params": {} },
+  "credentials": null
+}
+```
+
+`204` when nothing matches. `inputs` is keyed by the step's input slots and resolved to the registered artifacts. The lease length is the recipe step's `lease_seconds` if set, else the request's, else the executor's default. `credentials` is reserved for step-scoped storage credentials.
+
+**Capability matching.** `requires` and `capabilities` are flat objects. For each key in `requires`: a number requires `capabilities[key] >= value`; a boolean or string requires equality; a list requires every element to be present in the capability list. A missing capability fails the match.
+
+### `POST /runner/steps/:job_id/:step_id/heartbeat`
+
+`{ "lease_token": "…", "progress": { "percent": 40 }, "log": "downloaded 12/30" }` extends the lease by the step's `lease_seconds` and, when `progress` or `log` is given, appends a `job_step_detailing` row. `409` when the token does not match the current lease: the worker must abort the step immediately.
+
+### `POST /runner/steps/:job_id/:step_id/complete`
+
+`{ "lease_token": "…", "artifacts": { "zarr": { "type": "zarr", "uri": "s3://…", "hash": "sha256:…", "metadata": {} } } }`, keyed by the executor's output slots (all of them, nothing else). Registers the artifacts under the recipe's output names (`step:<id>.<slot>`) with `producer_step` set, marks the step `success`, and when no step remains open marks the job `success` (all steps succeeded) or `failed`. Returns `{ "job_status": "…" }`. Idempotent: a repeat with identical artifacts returns `200` and changes nothing; a repeat with different artifacts returns `409`.
+
+### `POST /runner/steps/:job_id/:step_id/fail`
+
+```json
+{ "lease_token": "…", "kind": "error", "error": "GRIB decode failed", "retry": true, "cooldown_seconds": 60 }
+{ "lease_token": "…", "kind": "wait", "error": "run not published yet", "cooldown_seconds": 900 }
+```
+
+- `kind: error`: if `retry` is false or the attempt counter reached `max_attempts` (the recipe step's, else the executor's), the step becomes `failed`, the job's remaining `pending` and `blocked` steps become `skipped`, and the job becomes `failed` with `error` set. Otherwise the step returns to `pending`, with `blocked_until = now + cooldown_seconds` when given.
+- `kind: wait`: the step becomes `blocked` until `now + cooldown_seconds` (required) and the attempt counter is handed back, so waiting for a late input never burns a retry.
+
+Returns `{ "step_status": "…", "job_status": "…", "attempt": n }`. Both kinds release the lease.
+
+### Sweeper
+
+Every `SWEEPER_INTERVAL_SECONDS` (default 60, `0` disables) Ordo fails `running` steps whose lease expired as `kind: error`, `error: "lease expired"`, retryable. Steps claimed by n8n have no lease and are never touched.
+
+### Recipe step overrides
+
+A recipe step may set `max_attempts`, `lease_seconds` and `requires`; they override the executor's defaults for that step. See [Pipeline Authoring](PIPELINE-AUTHORING.md).
 
 ## Recipe Validation
 
