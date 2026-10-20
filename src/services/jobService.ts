@@ -19,9 +19,35 @@ import {
 import { ValidationError } from "../utils/validation";
 import { computeJobProgressPercentage } from "../utils/progress";
 
-export const createJob = async (req: CreateJobRequest): Promise<number> => {
+export interface CreateJobResult {
+  id: number;
+  created: boolean;
+}
+
+const findJobByIdempotencyKey = async (key: string): Promise<number | null> => {
   const pool = getPool();
   const schema = getSchema();
+  const result = await pool.query(
+    `SELECT id FROM ${schema}.job WHERE idempotency_key = $1`,
+    [key],
+  );
+  return result.rows.length > 0 ? result.rows[0].id : null;
+};
+
+export const createJob = async (
+  req: CreateJobRequest,
+  createdByKeyId: number | null = null,
+): Promise<CreateJobResult> => {
+  const pool = getPool();
+  const schema = getSchema();
+
+  // A job with this idempotency key already exists: return it, create nothing.
+  if (req.idempotency_key) {
+    const existingId = await findJobByIdempotencyKey(req.idempotency_key);
+    if (existingId !== null) {
+      return { id: existingId, created: false };
+    }
+  }
 
   let recipeId: number;
 
@@ -161,10 +187,10 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     // Create job
     const jobParamsJson = JSON.stringify(jobParams);
     const jobResult = await client.query(
-      `INSERT INTO ${schema}.job (recipe_id, status, params)
-       VALUES ($1, 'pending', $2::jsonb)
+      `INSERT INTO ${schema}.job (recipe_id, status, params, idempotency_key, created_by_key_id)
+       VALUES ($1, 'pending', $2::jsonb, $3, $4)
        RETURNING id`,
-      [recipeId, jobParamsJson],
+      [recipeId, jobParamsJson, req.idempotency_key ?? null, createdByKeyId],
     );
     const jobId = jobResult.rows[0].id;
 
@@ -200,9 +226,18 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     for (const step of recipeSteps) {
       await client.query(
         `INSERT INTO ${schema}.job_step
-         (job_id, step_id, step_type, status, attempt, max_concurrency)
-         VALUES ($1, $2, $3, 'pending', 0, $4)`,
-        [jobId, step.id, step.type, step.max_concurrency ?? null],
+         (job_id, step_id, step_type, status, attempt, max_concurrency,
+          max_attempts, lease_seconds, requires)
+         VALUES ($1, $2, $3, 'pending', 0, $4, $5, $6, $7::jsonb)`,
+        [
+          jobId,
+          step.id,
+          step.type,
+          step.max_concurrency ?? null,
+          step.max_attempts ?? null,
+          step.lease_seconds ?? null,
+          step.requires ? JSON.stringify(step.requires) : null,
+        ],
       );
     }
 
@@ -218,14 +253,24 @@ export const createJob = async (req: CreateJobRequest): Promise<number> => {
     }
 
     await client.query("COMMIT");
-    return jobId;
+    return { id: jobId, created: true };
   } catch (error) {
     await client.query("ROLLBACK");
+    // Two schedulers raced on the same idempotency key: the other one won.
+    if (
+      req.idempotency_key &&
+      (error as { code?: string }).code === "23505"
+    ) {
+      const existingId = await findJobByIdempotencyKey(req.idempotency_key);
+      if (existingId !== null) {
+        return { id: existingId, created: false };
+      }
+    }
     throw error;
   } finally {
     client.release();
   }
-};;
+};
 
 export const getJobStatus = async (
   jobId: number
@@ -235,7 +280,7 @@ export const getJobStatus = async (
 
   // Get job
   const jobResult = await pool.query(
-    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params, idempotency_key
      FROM ${schema}.job
      WHERE id = $1`,
     [jobId],
@@ -255,12 +300,14 @@ export const getJobStatus = async (
     finished_at: jobRow.finished_at,
     error: jobRow.error,
     params: jobRow.params ?? {},
+    idempotency_key: jobRow.idempotency_key ?? null,
   };
 
   // Get steps
   const stepsResult = await pool.query(
     `SELECT job_id, step_id, step_type, status, attempt, claimed_by, claimed_at,
-            started_at, finished_at, error, max_concurrency
+            started_at, finished_at, error, max_concurrency,
+            blocked_until, lease_expires_at, max_attempts, lease_seconds, requires
      FROM ${schema}.job_step
      WHERE job_id = $1
      ORDER BY step_id`,
@@ -281,6 +328,11 @@ export const getJobStatus = async (
     finished_at: row.finished_at,
     error: row.error,
     max_concurrency: row.max_concurrency,
+    blocked_until: row.blocked_until ?? null,
+    lease_expires_at: row.lease_expires_at ?? null,
+    max_attempts: row.max_attempts ?? null,
+    lease_seconds: row.lease_seconds ?? null,
+    requires: row.requires ?? null,
     last_detailing: detailingByStep.get(row.step_id) ?? null,
   }));
 
@@ -369,7 +421,7 @@ export const getJobsBatch = async (
   const schema = getSchema();
 
   const jobsResult = await pool.query(
-    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params, idempotency_key
      FROM ${schema}.job
      WHERE id = ANY($1::int[])`,
     [jobIds]
@@ -377,7 +429,8 @@ export const getJobsBatch = async (
 
   const stepsResult = await pool.query(
     `SELECT job_id, step_id, step_type, status, attempt, claimed_by, claimed_at,
-            started_at, finished_at, error, max_concurrency
+            started_at, finished_at, error, max_concurrency,
+            blocked_until, lease_expires_at, max_attempts, lease_seconds, requires
      FROM ${schema}.job_step
      WHERE job_id = ANY($1::int[])
      ORDER BY job_id, step_id`,
@@ -417,6 +470,11 @@ export const getJobsBatch = async (
       finished_at: row.finished_at,
       error: row.error,
       max_concurrency: row.max_concurrency,
+      blocked_until: row.blocked_until ?? null,
+      lease_expires_at: row.lease_expires_at ?? null,
+      max_attempts: row.max_attempts ?? null,
+      lease_seconds: row.lease_seconds ?? null,
+      requires: row.requires ?? null,
       last_detailing: detailingByJob.get(row.job_id)?.get(row.step_id) ?? null,
     });
   }
@@ -461,6 +519,7 @@ export const getJobsBatch = async (
       finished_at: row.finished_at,
       error: row.error,
       params: row.params ?? {},
+      idempotency_key: row.idempotency_key ?? null,
     };
 
     const steps = stepsByJob.get(job.id) ?? [];
@@ -507,13 +566,30 @@ export const getJobsBatch = async (
   return result;
 };
 
-export const listJobs = async (): Promise<Job[]> => {
+export interface ListJobsFilter {
+  idempotency_key?: string;
+  status?: string;
+}
+
+export const listJobs = async (filter: ListJobsFilter = {}): Promise<Job[]> => {
   const pool = getPool();
   const schema = getSchema();
+  const conditions: string[] = [];
+  const params: string[] = [];
+  if (filter.idempotency_key !== undefined) {
+    params.push(filter.idempotency_key);
+    conditions.push(`idempotency_key = $${params.length}`);
+  }
+  if (filter.status !== undefined) {
+    params.push(filter.status);
+    conditions.push(`status = $${params.length}`);
+  }
+  const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
   const result = await pool.query(
-    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error
-     FROM ${schema}.job
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, idempotency_key
+     FROM ${schema}.job${where}
      ORDER BY id DESC`,
+    params.length ? params : undefined,
   );
   return result.rows.map((row) => ({
     id: row.id,
@@ -523,5 +599,6 @@ export const listJobs = async (): Promise<Job[]> => {
     started_at: row.started_at,
     finished_at: row.finished_at,
     error: row.error,
+    idempotency_key: row.idempotency_key ?? null,
   }));
 };

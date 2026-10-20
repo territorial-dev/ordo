@@ -14,7 +14,7 @@ if (!process.env.DATABASE_URL) {
 
 import express, { Request, Response } from "express";
 import morgan from "morgan";
-import { authMiddleware } from "./middleware/auth";
+import { authMiddleware, requireRole } from "./middleware/auth";
 import {
   createJobHandler,
   listJobsHandler,
@@ -35,10 +35,25 @@ import {
   listOutputsHandler,
   getOutputHandler,
 } from "./controllers/outputController";
-import { listExecutorsHandler } from "./controllers/executorController";
+import {
+  listExecutorsHandler,
+  upsertExecutorHandler,
+} from "./controllers/executorController";
 import { listJobStepDetailingHandler } from "./controllers/jobStepDetailingController";
+import {
+  createKeyHandler,
+  listKeysHandler,
+  revokeKeyHandler,
+} from "./controllers/keyController";
+import {
+  claimHandler,
+  completeHandler,
+  failHandler,
+  heartbeatHandler,
+} from "./controllers/runnerController";
 import { closePool } from "./db/connection";
 import { runMigrations } from "./db/migrations";
+import { startSweeper } from "./services/runnerService";
 import { version } from "../package.json";
 
 const app = express();
@@ -62,8 +77,29 @@ app.get("/health", (_req: Request, res: Response) => {
   res.json({ status: "ok" });
 });
 
-// All other routes require authentication
+// All other routes require authentication. API_TOKEN is the admin key; other
+// keys come from the api_key table with a role (admin, scheduler, runner).
 app.use(authMiddleware);
+
+// Runner API: leased step execution over HTTP (runner role)
+app.post("/runner/claim", requireRole("runner"), claimHandler);
+app.post("/runner/steps/:job_id/:step_id/heartbeat", requireRole("runner"), heartbeatHandler);
+app.post("/runner/steps/:job_id/:step_id/complete", requireRole("runner"), completeHandler);
+app.post("/runner/steps/:job_id/:step_id/fail", requireRole("runner"), failHandler);
+
+// Key management (admin only)
+app.post("/keys", requireRole(), createKeyHandler);
+app.get("/keys", requireRole(), listKeysHandler);
+app.delete("/keys/:id", requireRole(), revokeKeyHandler);
+
+// Executor registration (admin, or scheduler for runner "api")
+app.put("/step-executors/:step_type", requireRole("scheduler"), upsertExecutorHandler);
+
+// A runner may read the job it holds
+app.get("/jobs/:id([0-9]+)", requireRole("scheduler", "runner"), getJobStatusHandler);
+
+// Everything below: admin and scheduler
+app.use(requireRole("scheduler"));
 
 // Recipe endpoints
 app.get("/recipes", listRecipesHandler);
@@ -74,7 +110,6 @@ app.post("/recipes", createRecipeHandler);
 // Job endpoints
 app.get("/jobs", listJobsHandler);
 app.get("/jobs/:ids([0-9,]+,[0-9,]+)", getBatchJobStatusHandler);
-app.get("/jobs/:id", getJobStatusHandler);
 app.post("/jobs", createJobHandler);
 
 // Artifact endpoints
@@ -88,7 +123,7 @@ app.get("/outputs/:id", getOutputHandler);
 // Executor endpoints
 app.get("/executors", listExecutorsHandler);
 
-// Job step detailing endpoints (read-only; written directly by n8n)
+// Job step detailing endpoints (read-only; written by n8n and by runner heartbeats)
 // Filter by job_id and/or step_id via query params; always ordered by updated_at.
 app.get("/detailing", listJobStepDetailingHandler);
 
@@ -117,6 +152,7 @@ if (require.main === module) {
   (async () => {
     try {
       await runMigrations();
+      startSweeper(parseInt(process.env.SWEEPER_INTERVAL_SECONDS ?? "60", 10));
       app.listen(PORT, () => {
         console.log(`Ordo v${version} listening on port ${PORT}`);
       });

@@ -36,23 +36,20 @@ export const runMigrations = async (): Promise<void> => {
     const filePath = path.join(migrationsDir, fileName);
     const rawSql = await fs.readFile(filePath, "utf8");
     const sql = rawSql.split("{{schema}}").join(schema);
-    const statements = sql
-      .split(";")
-      .map((statement: string) => statement.trim())
-      .filter((statement: string) => statement.length > 0);
 
+    // The whole file runs as one multi-statement query inside a transaction.
+    // Splitting on ";" would break function bodies (plpgsql), so it is not done.
     const client = await pool.connect();
     try {
       await client.query("BEGIN");
-      for (const statement of statements) {
-        await client.query(statement);
-      }
+      await client.query(sql);
       await client.query(
         `INSERT INTO ${schema}.migrations (name) VALUES ($1)`,
         [fileName]
       );
       await client.query("COMMIT");
       appliedCount += 1;
+      console.log(`Migrations: applied ${fileName}`);
     } catch (error) {
       await client.query("ROLLBACK");
       throw error;

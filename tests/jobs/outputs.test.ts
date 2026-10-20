@@ -76,7 +76,7 @@ describe('job output mapping validation', () => {
 
     await expect(
       createJob({ recipe_id: 1, inputs: rawInput }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('succeeds when outputs reference a valid step-produced artifact', async () => {
@@ -91,7 +91,7 @@ describe('job output mapping validation', () => {
         inputs: rawInput,
         outputs: { 'step:step1.output': { path: '/dest/model.bin' } },
       }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('rejects when an output references an artifact not producible by any step', async () => {
@@ -141,7 +141,7 @@ describe('job output mapping validation', () => {
           'step:step2.output': { path: '/dest/final' },
         },
       }),
-    ).resolves.toBeTypeOf('number');
+    ).resolves.toMatchObject({ created: true });
   });
 
   it('rejects when at least one output in a multi-output declaration is invalid', async () => {

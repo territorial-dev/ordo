@@ -286,6 +286,27 @@ const validateStep = (step: StepDefinition): void => {
       );
     }
   }
+
+  for (const field of ["max_attempts", "lease_seconds"] as const) {
+    const value = step[field];
+    if (value !== undefined) {
+      if (typeof value !== "number" || !Number.isInteger(value) || value < 1) {
+        throw new ValidationError(
+          `Step "${step.id}" ${field} must be a positive integer (>= 1)`
+        );
+      }
+    }
+  }
+
+  if (step.requires !== undefined) {
+    if (
+      typeof step.requires !== "object" ||
+      step.requires === null ||
+      Array.isArray(step.requires)
+    ) {
+      throw new ValidationError(`Step "${step.id}" requires must be an object`);
+    }
+  }
 };
 
 const validateOnExitStep = (step: OnExitStep | any): void => {
