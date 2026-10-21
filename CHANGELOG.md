@@ -1,3 +1,10 @@
+# [1.10.0](https://github.com/territorial-dev/ordo/compare/v1.9.0...v1.10.0) (2026-10-21)
+
+
+### Features
+
+* job priority in claim order, POST /jobs/:id/retry to requeue a failed job ([8b7a646](https://github.com/territorial-dev/ordo/commit/8b7a646d7394c08e29dd146a0407d58897ec2aa3))
+
 # [1.9.0](https://github.com/territorial-dev/ordo/compare/v1.8.0...v1.9.0) (2026-10-20)
 
 
