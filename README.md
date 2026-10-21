@@ -219,6 +219,7 @@ Create a job from a recipe.
 - `outputs` (optional): Object mapping artifact names to final destination paths. All artifact names must be producible by the recipe DAG.
 - `params` (optional): Object mapping step IDs to param objects (param name → value). Supplies concrete parameter values for steps that declare `required_params` in the recipe. Parameter values are not part of recipe identity and do not affect recipe versioning.
 - `idempotency_key` (optional): A string unique per job. Creating a job twice with the same key yields one job: the first call returns `201` with `created: true`, every repeat returns `200` with the existing id and `created: false`. Two callers racing on the same key both get the same id. Jobs without a key behave as before.
+- `priority` (optional): An integer between -1000 and 1000, default 0. Runners using the runner API claim the steps of higher-priority jobs first; at equal priority the older job goes first. A low-priority job is never starved outright, it is simply served after everything above it. n8n runners reading Postgres directly are not affected unless they order by it.
 
 **Response:**
 
@@ -229,7 +230,13 @@ Create a job from a recipe.
 }
 ```
 
-`GET /jobs?idempotency_key=<key>` looks a job up by key (an indexed lookup; returns an array with zero or one job). `GET /jobs?status=<status>` filters by job status.
+`GET /jobs?idempotency_key=<key>` looks a job up by key (an indexed lookup; returns an array with zero or one job). `GET /jobs?status=<status>` filters by job status. Every job object carries its `priority`.
+
+### POST /jobs/:id/retry
+
+Requeues a failed job under its own id and idempotency key. The failed step and the steps skipped because of it go back to `pending` with their attempt counters cleared; succeeded steps keep their artifacts, so the job resumes where it broke. The job becomes `pending` with its error cleared. An optional body `{ "priority": 100 }` changes the job's priority at the same time.
+
+**Response** `200`: `{ "id": 812, "status": "pending", "priority": 0, "steps_reset": ["harmonize", "finalize"] }`. `404` when the job does not exist, `409` when it is not `failed`. Requires the `scheduler` role (admins included).
 
 **Job-Level Outputs:**
 
@@ -394,7 +401,7 @@ Workers that execute steps over HTTP instead of reading Postgres directly. All r
 }
 ```
 
-Ordo picks one step, atomically (`FOR UPDATE SKIP LOCKED`), that is `pending` or `blocked` with `blocked_until` passed, whose job is still open, whose executor has `runner = 'api'`, whose upstream steps have all succeeded, whose `requires` matches the capabilities, and whose `max_concurrency` is not exhausted. `step_types` is optional and narrows the claim. The step becomes `running` with the attempt counter advanced, and the job becomes `running` if it was pending. Response `200`:
+Ordo picks one step, atomically (`FOR UPDATE SKIP LOCKED`), that is `pending` or `blocked` with `blocked_until` passed, whose job is still open, whose executor has `runner = 'api'`, whose upstream steps have all succeeded, whose `requires` matches the capabilities, and whose `max_concurrency` is not exhausted. Candidates are considered by job `priority` (highest first), then by job id, then by step id. `step_types` is optional and narrows the claim. The step becomes `running` with the attempt counter advanced, and the job becomes `running` if it was pending. Response `200`:
 
 ```json
 {

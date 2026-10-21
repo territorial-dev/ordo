@@ -1,6 +1,8 @@
 import { Request, Response } from "express";
-import { createJob, getJobStatus, getJobsBatch, listJobs } from "../services/jobService";
+import { createJob, getJobStatus, getJobsBatch, listJobs, retryJob } from "../services/jobService";
+import { ConflictError } from "../services/runnerService";
 import { CreateJobRequest } from "../types";
+import { parsePriority } from "../utils/jobs";
 import { ValidationError } from "../utils/validation";
 
 export const createJobHandler = async (
@@ -108,6 +110,13 @@ export const createJobHandler = async (
       return;
     }
 
+    try {
+      body.priority = parsePriority(body.priority);
+    } catch (error) {
+      res.status(400).json({ error: (error as Error).message });
+      return;
+    }
+
     const { id, created } = await createJob(body, req.auth?.keyId ?? null);
     res.status(created ? 201 : 200).json({ id, created });
   } catch (error) {
@@ -120,6 +129,39 @@ export const createJobHandler = async (
       return;
     }
     console.error("Error creating job:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const retryJobHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const jobId = parseInt(req.params.id, 10);
+  if (isNaN(jobId)) {
+    res.status(400).json({ error: "Invalid job ID" });
+    return;
+  }
+  let priority: number | undefined;
+  try {
+    priority = parsePriority(req.body?.priority);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+    return;
+  }
+  try {
+    const result = await retryJob(jobId, priority);
+    if (!result) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    if (error instanceof ConflictError) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
+    console.error("Error retrying job:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

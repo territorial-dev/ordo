@@ -24,7 +24,7 @@ export const runMigrations = async (): Promise<void> => {
   const migrationsDir = path.resolve(__dirname, "../../migrations");
   const entries = await fs.readdir(migrationsDir);
   const migrationFiles = entries
-    .filter((entry) => entry.endsWith(".sql"))
+    .filter((entry) => entry.endsWith(".sql") && !entry.startsWith("."))
     .sort((a, b) => a.localeCompare(b));
 
   let appliedCount = 0;

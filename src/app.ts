@@ -20,6 +20,7 @@ import {
   listJobsHandler,
   getJobStatusHandler,
   getBatchJobStatusHandler,
+  retryJobHandler,
 } from "./controllers/jobController";
 import {
   listRecipesHandler,
@@ -111,6 +112,7 @@ app.post("/recipes", createRecipeHandler);
 app.get("/jobs", listJobsHandler);
 app.get("/jobs/:ids([0-9,]+,[0-9,]+)", getBatchJobStatusHandler);
 app.post("/jobs", createJobHandler);
+app.post("/jobs/:id([0-9]+)/retry", retryJobHandler);
 
 // Artifact endpoints
 app.get("/artifacts", listArtifactsHandler);
