@@ -18,6 +18,8 @@ import {
 } from "./jobStepDetailingService";
 import { ValidationError } from "../utils/validation";
 import { computeJobProgressPercentage } from "../utils/progress";
+import { canRetry } from "../utils/jobs";
+import { ConflictError } from "./runnerService";
 
 export interface CreateJobResult {
   id: number;
@@ -187,10 +189,10 @@ export const createJob = async (
     // Create job
     const jobParamsJson = JSON.stringify(jobParams);
     const jobResult = await client.query(
-      `INSERT INTO ${schema}.job (recipe_id, status, params, idempotency_key, created_by_key_id)
-       VALUES ($1, 'pending', $2::jsonb, $3, $4)
+      `INSERT INTO ${schema}.job (recipe_id, status, params, idempotency_key, created_by_key_id, priority)
+       VALUES ($1, 'pending', $2::jsonb, $3, $4, $5)
        RETURNING id`,
-      [recipeId, jobParamsJson, req.idempotency_key ?? null, createdByKeyId],
+      [recipeId, jobParamsJson, req.idempotency_key ?? null, createdByKeyId, req.priority ?? 0],
     );
     const jobId = jobResult.rows[0].id;
 
@@ -280,7 +282,7 @@ export const getJobStatus = async (
 
   // Get job
   const jobResult = await pool.query(
-    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params, idempotency_key
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params, idempotency_key, priority
      FROM ${schema}.job
      WHERE id = $1`,
     [jobId],
@@ -301,6 +303,7 @@ export const getJobStatus = async (
     error: jobRow.error,
     params: jobRow.params ?? {},
     idempotency_key: jobRow.idempotency_key ?? null,
+    priority: jobRow.priority ?? 0,
   };
 
   // Get steps
@@ -421,7 +424,7 @@ export const getJobsBatch = async (
   const schema = getSchema();
 
   const jobsResult = await pool.query(
-    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params, idempotency_key
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, params, idempotency_key, priority
      FROM ${schema}.job
      WHERE id = ANY($1::int[])`,
     [jobIds]
@@ -520,6 +523,7 @@ export const getJobsBatch = async (
       error: row.error,
       params: row.params ?? {},
       idempotency_key: row.idempotency_key ?? null,
+      priority: row.priority ?? 0,
     };
 
     const steps = stepsByJob.get(job.id) ?? [];
@@ -586,7 +590,7 @@ export const listJobs = async (filter: ListJobsFilter = {}): Promise<Job[]> => {
   }
   const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
   const result = await pool.query(
-    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, idempotency_key
+    `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, idempotency_key, priority
      FROM ${schema}.job${where}
      ORDER BY id DESC`,
     params.length ? params : undefined,
@@ -600,5 +604,70 @@ export const listJobs = async (filter: ListJobsFilter = {}): Promise<Job[]> => {
     finished_at: row.finished_at,
     error: row.error,
     idempotency_key: row.idempotency_key ?? null,
+    priority: row.priority ?? 0,
   }));
+};
+
+export interface RetryJobResult {
+  id: number;
+  status: "pending";
+  priority: number;
+  steps_reset: string[];
+}
+
+/**
+ * Requeues a failed job under its own id and idempotency key: the failed step and the steps
+ * skipped because of it go back to `pending` with the attempt counter cleared; succeeded
+ * steps keep their artifacts, so the job resumes where it broke. Returns null when the job
+ * does not exist and throws ConflictError when it is not failed.
+ */
+export const retryJob = async (
+  jobId: number,
+  priority?: number,
+): Promise<RetryJobResult | null> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const job = await client.query(
+      `SELECT id, status, priority FROM ${schema}.job WHERE id = $1 FOR UPDATE`,
+      [jobId],
+    );
+    if (job.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    if (!canRetry(job.rows[0].status)) {
+      throw new ConflictError(`Job is ${job.rows[0].status}, not failed`);
+    }
+    const reset = await client.query(
+      `UPDATE ${schema}.job_step
+       SET status = 'pending', attempt = 0, error = NULL, claimed_by = NULL, claimed_at = NULL,
+           started_at = NULL, finished_at = NULL, lease_token = NULL, lease_expires_at = NULL,
+           blocked_until = NULL
+       WHERE job_id = $1 AND status IN ('failed', 'skipped')
+       RETURNING step_id`,
+      [jobId],
+    );
+    const newPriority = priority ?? job.rows[0].priority ?? 0;
+    await client.query(
+      `UPDATE ${schema}.job
+       SET status = 'pending', error = NULL, started_at = NULL, finished_at = NULL, priority = $2
+       WHERE id = $1`,
+      [jobId, newPriority],
+    );
+    await client.query("COMMIT");
+    return {
+      id: jobId,
+      status: "pending",
+      priority: newPriority,
+      steps_reset: reset.rows.map((r) => r.step_id),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
 };

@@ -27,7 +27,7 @@ export class RunnerRequestError extends Error {
   }
 }
 
-const CANDIDATE_LIMIT = 50;
+const CANDIDATE_LIMIT = 200;
 
 interface StepRow {
   job_id: number;
@@ -91,7 +91,7 @@ export const claimStep = async (req: ClaimRequest): Promise<ClaimedStep | null> 
          AND (js.status = 'pending'
               OR (js.status = 'blocked' AND js.blocked_until IS NOT NULL AND js.blocked_until <= now()))
          AND ($1::text[] IS NULL OR js.step_type = ANY($1::text[]))
-       ORDER BY js.job_id, js.step_id
+       ORDER BY j.priority DESC, js.job_id, js.step_id
        LIMIT ${CANDIDATE_LIMIT}
        FOR UPDATE OF js SKIP LOCKED`,
       [stepTypes],

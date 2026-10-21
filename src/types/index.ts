@@ -42,6 +42,8 @@ export interface Job {
   error: string | null;
   params?: Record<string, Record<string, any>>; // step_id -> param name -> value
   idempotency_key?: string | null;
+  /** Runners claim higher priority first; equal priority keeps creation order. Default 0. */
+  priority?: number;
 }
 
 export interface JobStep {
@@ -127,6 +129,8 @@ export interface CreateJobRequest {
   params?: Record<string, Record<string, any>>;
   /** Optional. Unique per job; a repeat returns the existing job instead of creating another. */
   idempotency_key?: string;
+  /** Optional integer, default 0. Runners claim higher priority first. */
+  priority?: number;
 }
 
 export interface JobProgress {
