@@ -18,6 +18,7 @@ import { authMiddleware, requireRole } from "./middleware/auth";
 import {
   createJobHandler,
   listJobsHandler,
+  countJobsHandler,
   getJobStatusHandler,
   getBatchJobStatusHandler,
   retryJobHandler,
@@ -110,6 +111,7 @@ app.post("/recipes", createRecipeHandler);
 
 // Job endpoints
 app.get("/jobs", listJobsHandler);
+app.get("/jobs/counts", countJobsHandler);
 app.get("/jobs/:ids([0-9,]+,[0-9,]+)", getBatchJobStatusHandler);
 app.post("/jobs", createJobHandler);
 app.post("/jobs/:id([0-9]+)/retry", retryJobHandler);
