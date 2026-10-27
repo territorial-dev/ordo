@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { createJob, getJobStatus, getJobsBatch, listJobs, retryJob } from "../services/jobService";
+import { countJobs, createJob, getJobStatus, getJobsBatch, JobFilterError, listJobs, parseJobFilter, retryJob } from "../services/jobService";
 import { ConflictError } from "../services/runnerService";
 import { CreateJobRequest } from "../types";
 import { parsePriority } from "../utils/jobs";
@@ -171,17 +171,30 @@ export const listJobsHandler = async (
   res: Response,
 ): Promise<void> => {
   try {
-    const filter: { idempotency_key?: string; status?: string } = {};
-    if (req.query.idempotency_key !== undefined) {
-      filter.idempotency_key = String(req.query.idempotency_key);
-    }
-    if (req.query.status !== undefined) {
-      filter.status = String(req.query.status);
-    }
-    const jobs = await listJobs(filter);
+    const jobs = await listJobs(parseJobFilter(req.query as Record<string, unknown>));
     res.json(jobs);
   } catch (error) {
+    if (error instanceof JobFilterError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
     console.error("Error listing jobs:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const countJobsHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    res.json(await countJobs(parseJobFilter(req.query as Record<string, unknown>)));
+  } catch (error) {
+    if (error instanceof JobFilterError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    console.error("Error counting jobs:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

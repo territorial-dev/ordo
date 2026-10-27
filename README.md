@@ -232,6 +232,28 @@ Create a job from a recipe.
 
 `GET /jobs?idempotency_key=<key>` looks a job up by key (an indexed lookup; returns an array with zero or one job). `GET /jobs?status=<status>` filters by job status. Every job object carries its `priority`.
 
+### GET /jobs filters
+
+Without any query parameter, `GET /jobs` returns every job, newest first, with no limit (unchanged). Optional filters, combined with AND:
+
+| Parameter | Meaning |
+|---|---|
+| `status` | One status or a comma-separated list (`pending,running`); any of them |
+| `key_prefix` | Idempotency key starts with this; comma-separated or repeated for any of several. `%` and `_` match literally |
+| `created_after`, `finished_after` | ISO timestamps, inclusive |
+| `order` | `desc` (default, newest first) or `asc`, by id |
+| `limit` | At most this many jobs, 1 to 100000 |
+
+A malformed value answers `400` with the reason. Examples: the oldest pending job is `GET /jobs?status=pending&order=asc&limit=1`; what finished in the last two days is `GET /jobs?finished_after=2026-10-25T12:00:00Z`.
+
+### GET /jobs/counts
+
+How many jobs match, per status, without listing them. Takes the same filters (`order` and `limit` are ignored); every status appears, zero when no job has it.
+
+```json
+{ "total": 3696, "by_status": { "pending": 3692, "running": 0, "success": 0, "failed": 4 } }
+```
+
 ### POST /jobs/:id/retry
 
 Requeues a failed job under its own id and idempotency key. The failed step and the steps skipped because of it go back to `pending` with their attempt counters cleared; succeeded steps keep their artifacts, so the job resumes where it broke. The job becomes `pending` with its error cleared. An optional body `{ "priority": 100 }` changes the job's priority at the same time.

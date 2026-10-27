@@ -570,29 +570,123 @@ export const getJobsBatch = async (
   return result;
 };
 
+export const JOB_STATUSES = ["pending", "running", "success", "failed"] as const;
+export const MAX_LIST_LIMIT = 100_000;
+
+/**
+ * Filters for `GET /jobs` and `GET /jobs/counts`. Every field is optional and they combine
+ * with AND; without any, the list is every job, newest first, as before.
+ */
 export interface ListJobsFilter {
   idempotency_key?: string;
-  status?: string;
+  /** One status or several (any of). */
+  status?: string | string[];
+  /** Idempotency key starts with any of these. */
+  key_prefix?: string[];
+  /** ISO timestamps, inclusive. */
+  created_after?: string;
+  finished_after?: string;
+  /** By id; default "desc" (newest first). */
+  order?: "asc" | "desc";
+  /** At most this many rows; absent means no limit. */
+  limit?: number;
 }
 
-export const listJobs = async (filter: ListJobsFilter = {}): Promise<Job[]> => {
-  const pool = getPool();
-  const schema = getSchema();
+export class JobFilterError extends Error {}
+
+function listOf(value: unknown): string[] {
+  const raw = Array.isArray(value) ? value : [value];
+  return raw
+    .flatMap((v) => String(v).split(","))
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+}
+
+function timestamp(name: string, value: unknown): string {
+  const text = String(value);
+  if (Number.isNaN(Date.parse(text))) {
+    throw new JobFilterError(`${name} must be an ISO timestamp, got ${JSON.stringify(text)}`);
+  }
+  return new Date(text).toISOString();
+}
+
+/** The filter from a request's query string; throws JobFilterError on a malformed value. */
+export function parseJobFilter(query: Record<string, unknown>): ListJobsFilter {
+  const filter: ListJobsFilter = {};
+  if (query.idempotency_key !== undefined) filter.idempotency_key = String(query.idempotency_key);
+  if (query.status !== undefined) {
+    const statuses = listOf(query.status);
+    if (statuses.length === 0) throw new JobFilterError("status is empty");
+    filter.status = statuses.length === 1 ? statuses[0] : statuses;
+  }
+  if (query.key_prefix !== undefined) {
+    const prefixes = listOf(query.key_prefix);
+    if (prefixes.length === 0) throw new JobFilterError("key_prefix is empty");
+    if (prefixes.length > 100) throw new JobFilterError("at most 100 key prefixes");
+    filter.key_prefix = prefixes;
+  }
+  if (query.created_after !== undefined) filter.created_after = timestamp("created_after", query.created_after);
+  if (query.finished_after !== undefined) filter.finished_after = timestamp("finished_after", query.finished_after);
+  if (query.order !== undefined) {
+    const order = String(query.order).toLowerCase();
+    if (order !== "asc" && order !== "desc") throw new JobFilterError("order must be asc or desc");
+    filter.order = order;
+  }
+  if (query.limit !== undefined) {
+    const limit = Number(query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > MAX_LIST_LIMIT) {
+      throw new JobFilterError(`limit must be an integer from 1 to ${MAX_LIST_LIMIT}`);
+    }
+    filter.limit = limit;
+  }
+  return filter;
+}
+
+/** `LIKE` treats % and _ as wildcards; a key prefix must match literally. */
+function likePrefix(prefix: string): string {
+  return prefix.replace(/[\\%_]/g, (c) => `\\${c}`) + "%";
+}
+
+/** The WHERE clause (with a leading space, or empty) and its parameters for a filter. */
+export function jobWhere(filter: ListJobsFilter): { where: string; params: unknown[] } {
   const conditions: string[] = [];
-  const params: string[] = [];
+  const params: unknown[] = [];
   if (filter.idempotency_key !== undefined) {
     params.push(filter.idempotency_key);
     conditions.push(`idempotency_key = $${params.length}`);
   }
   if (filter.status !== undefined) {
-    params.push(filter.status);
-    conditions.push(`status = $${params.length}`);
+    const statuses = Array.isArray(filter.status) ? filter.status : [filter.status];
+    params.push(statuses);
+    conditions.push(`status = ANY($${params.length}::text[])`);
   }
-  const where = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+  if (filter.key_prefix && filter.key_prefix.length > 0) {
+    params.push(filter.key_prefix.map(likePrefix));
+    conditions.push(`idempotency_key LIKE ANY($${params.length}::text[])`);
+  }
+  if (filter.created_after !== undefined) {
+    params.push(filter.created_after);
+    conditions.push(`created_at >= $${params.length}`);
+  }
+  if (filter.finished_after !== undefined) {
+    params.push(filter.finished_after);
+    conditions.push(`finished_at >= $${params.length}`);
+  }
+  return { where: conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "", params };
+}
+
+export const listJobs = async (filter: ListJobsFilter = {}): Promise<Job[]> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const { where, params } = jobWhere(filter);
+  let tail = ` ORDER BY id ${filter.order === "asc" ? "ASC" : "DESC"}`;
+  if (filter.limit !== undefined) {
+    params.push(filter.limit);
+    tail += ` LIMIT $${params.length}`;
+  }
   const result = await pool.query(
     `SELECT id, recipe_id, status, created_at, started_at, finished_at, error, idempotency_key, priority
-     FROM ${schema}.job${where}
-     ORDER BY id DESC`,
+     FROM ${schema}.job${where}${tail}`,
     params.length ? params : undefined,
   );
   return result.rows.map((row) => ({
@@ -606,6 +700,29 @@ export const listJobs = async (filter: ListJobsFilter = {}): Promise<Job[]> => {
     idempotency_key: row.idempotency_key ?? null,
     priority: row.priority ?? 0,
   }));
+};
+
+export interface JobCounts {
+  total: number;
+  by_status: Record<string, number>;
+}
+
+/** How many jobs match the filter, per status (`order` and `limit` are ignored). */
+export const countJobs = async (filter: ListJobsFilter = {}): Promise<JobCounts> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const { where, params } = jobWhere({ ...filter, order: undefined, limit: undefined });
+  const result = await pool.query(
+    `SELECT status, COUNT(*)::int AS n FROM ${schema}.job${where} GROUP BY status`,
+    params.length ? params : undefined,
+  );
+  const by_status: Record<string, number> = Object.fromEntries(JOB_STATUSES.map((s) => [s, 0]));
+  let total = 0;
+  for (const row of result.rows) {
+    by_status[row.status] = Number(row.n);
+    total += Number(row.n);
+  }
+  return { total, by_status };
 };
 
 export interface RetryJobResult {
