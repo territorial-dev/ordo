@@ -1,3 +1,10 @@
+# [1.11.0](https://github.com/territorial-dev/ordo/compare/v1.10.0...v1.11.0) (2026-10-27)
+
+
+### Features
+
+* GET /jobs filters (limit, order, status list, key_prefix, created_after, finished_after) and GET /jobs/counts ([27dee0b](https://github.com/territorial-dev/ordo/commit/27dee0bf9c2482ac69da6ae4bd09257c3e82cda9))
+
 # [1.10.0](https://github.com/territorial-dev/ordo/compare/v1.9.0...v1.10.0) (2026-10-21)
 
 
