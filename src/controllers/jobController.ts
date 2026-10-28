@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { countJobs, createJob, getJobStatus, getJobsBatch, JobFilterError, listJobs, parseJobFilter, retryJob } from "../services/jobService";
+import { countJobs, createJob, deleteJob, deleteJobs, getJobStatus, getJobsBatch, JobFilterError, listJobs, parseJobFilter, retryJob } from "../services/jobService";
 import { ConflictError } from "../services/runnerService";
 import { CreateJobRequest } from "../types";
 import { parsePriority } from "../utils/jobs";
@@ -270,3 +270,45 @@ export const getJobStatusHandler = async (
   }
 };
 
+
+export const deleteJobHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const jobId = parseInt(req.params.id, 10);
+  if (isNaN(jobId)) {
+    res.status(400).json({ error: "Invalid job ID" });
+    return;
+  }
+  try {
+    const result = await deleteJob(jobId);
+    if (!result) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    if (error instanceof ConflictError) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
+    console.error("Error deleting job:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const deleteJobsHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    res.json(await deleteJobs(parseJobFilter(req.query as Record<string, unknown>)));
+  } catch (error) {
+    if (error instanceof JobFilterError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    console.error("Error deleting jobs:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};

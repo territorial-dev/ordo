@@ -21,6 +21,8 @@ import {
   countJobsHandler,
   getJobStatusHandler,
   getBatchJobStatusHandler,
+  deleteJobHandler,
+  deleteJobsHandler,
   retryJobHandler,
 } from "./controllers/jobController";
 import {
@@ -115,6 +117,8 @@ app.get("/jobs/counts", countJobsHandler);
 app.get("/jobs/:ids([0-9,]+,[0-9,]+)", getBatchJobStatusHandler);
 app.post("/jobs", createJobHandler);
 app.post("/jobs/:id([0-9]+)/retry", retryJobHandler);
+app.delete("/jobs/:id([0-9]+)", deleteJobHandler);
+app.delete("/jobs", deleteJobsHandler);
 
 // Artifact endpoints
 app.get("/artifacts", listArtifactsHandler);

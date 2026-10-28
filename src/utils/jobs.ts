@@ -28,3 +28,23 @@ export const stepsToReset = (steps: ReadonlyArray<{ step_id: string; status: str
 
 /** Whether a job in this status may be retried. */
 export const canRetry = (jobStatus: string): boolean => jobStatus === "failed";
+
+/** Step statuses under which nothing has run yet: a job made only of these may be deleted. */
+export const DELETABLE_STEP_STATUSES: ReadonlySet<string> = new Set(["pending", "blocked"]);
+
+/**
+ * Why a job cannot be deleted, or null when it can. A job is deletable while none of its steps
+ * has started: every step is `pending` or `blocked` (waiting for an input) and the job itself is
+ * still open. Anything that ran, failed or finished stays, so no artifact ever loses its record.
+ */
+export const deleteBlocker = (
+  jobStatus: string,
+  steps: ReadonlyArray<{ step_id: string; status: string }>,
+): string | null => {
+  if (jobStatus !== "pending" && jobStatus !== "running") {
+    return `Job is ${jobStatus}, not pending`;
+  }
+  const busy = steps.find((s) => !DELETABLE_STEP_STATUSES.has(s.status));
+  if (busy) return `Step ${busy.step_id} is ${busy.status}, not pending`;
+  return null;
+};
