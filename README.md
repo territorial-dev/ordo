@@ -267,6 +267,20 @@ Job-level outputs declare which artifacts should be finalized after a job comple
 - **Recipe-level outputs**: Used only to link steps in the DAG, always written to staging storage
 - **Job-level outputs**: Declared at job creation, reference artifact names produced by recipe steps, define final destination paths, imply stable/no-TTL retention
 
+### DELETE /jobs/:id
+
+Deletes a job none of whose steps has started: every step is `pending` or `blocked` (waiting for an input) and the job is still open. Anything that ran, failed or finished stays, so no artifact ever loses its record; a finished job is history, not queue. The job's steps, artifacts, outputs and step detailing go with it, in one transaction. The step rows are locked first, so a runner claiming at the same moment skips them.
+
+**Response** `200`: `{ "id": 812, "idempotency_key": "ingest_ecmwf:20240201T00Z:oper:precip:1.0.0", "deleted": true }`. `404` when the job does not exist, `409` with the reason (`Step harmonize is running, not pending`) when it cannot be deleted. Requires the `scheduler` role (admins included).
+
+### DELETE /jobs?key_prefix=…
+
+The bulk form: deletes every matching job none of whose steps has started and reports the rest as skipped, in one transaction. Takes the same filters as `GET /jobs` (`order` and `limit` are ignored); `key_prefix` is required, so a call can never empty the table by accident (`400` without it). Use `GET /jobs/counts` with the same filters first to see what a prefix covers.
+
+```json
+{ "deleted": [801, 802, 805], "skipped": 2 }
+```
+
 ### GET /jobs/:id
 
 Get job status, progress, steps, and artifacts.

@@ -1,3 +1,4 @@
+import { PoolClient } from "pg";
 import { getPool, getSchema } from "../db/connection";
 import {
   CreateJobRequest,
@@ -18,7 +19,7 @@ import {
 } from "./jobStepDetailingService";
 import { ValidationError } from "../utils/validation";
 import { computeJobProgressPercentage } from "../utils/progress";
-import { canRetry } from "../utils/jobs";
+import { canRetry, deleteBlocker } from "../utils/jobs";
 import { ConflictError } from "./runnerService";
 
 export interface CreateJobResult {
@@ -781,6 +782,115 @@ export const retryJob = async (
       priority: newPriority,
       steps_reset: reset.rows.map((r) => r.step_id),
     };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export interface DeleteJobResult {
+  id: number;
+  idempotency_key: string | null;
+  deleted: true;
+}
+
+/** Removes a job's rows in dependency order; `job_step_detailing` cascades from `job_step`. */
+async function deleteJobRows(client: PoolClient, schema: string, jobIds: number[]): Promise<void> {
+  if (jobIds.length === 0) return;
+  for (const table of ["job_output", "job_artifact", "job_step"]) {
+    await client.query(`DELETE FROM ${schema}.${table} WHERE job_id = ANY($1::int[])`, [jobIds]);
+  }
+  await client.query(`DELETE FROM ${schema}.job WHERE id = ANY($1::int[])`, [jobIds]);
+}
+
+/**
+ * Deletes a job none of whose steps has started (every step `pending` or `blocked`). The step
+ * rows are locked `FOR UPDATE` first, so a runner claiming at the same moment skips them
+ * (`claim` uses `SKIP LOCKED`) or, if it already holds them, finishes before the check runs
+ * and the check sees the step running. Returns null when the job does not exist and throws
+ * ConflictError when it cannot be deleted.
+ */
+export const deleteJob = async (jobId: number): Promise<DeleteJobResult | null> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const job = await client.query(
+      `SELECT id, status, idempotency_key FROM ${schema}.job WHERE id = $1 FOR UPDATE`,
+      [jobId],
+    );
+    if (job.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const steps = await client.query(
+      `SELECT step_id, status FROM ${schema}.job_step WHERE job_id = $1 ORDER BY step_id FOR UPDATE`,
+      [jobId],
+    );
+    const blocker = deleteBlocker(job.rows[0].status, steps.rows);
+    if (blocker) throw new ConflictError(blocker);
+    await deleteJobRows(client, schema, [jobId]);
+    await client.query("COMMIT");
+    return { id: jobId, idempotency_key: job.rows[0].idempotency_key ?? null, deleted: true };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+export interface DeleteJobsResult {
+  /** Ids of the jobs deleted, ascending. */
+  deleted: number[];
+  /** Jobs matching the filter that were left alone because a step had started or finished. */
+  skipped: number;
+}
+
+/**
+ * Bulk form of deleteJob for `DELETE /jobs?key_prefix=…`: deletes every matching job none of
+ * whose steps has started and counts the rest as skipped, in one transaction. `key_prefix` is
+ * required so a call can never empty the table by accident; `order` and `limit` are ignored.
+ */
+export const deleteJobs = async (filter: ListJobsFilter): Promise<DeleteJobsResult> => {
+  if (!filter.key_prefix || filter.key_prefix.length === 0) {
+    throw new JobFilterError("key_prefix is required to delete jobs in bulk");
+  }
+  const pool = getPool();
+  const schema = getSchema();
+  const { where, params } = jobWhere({ ...filter, order: undefined, limit: undefined });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const jobs = await client.query(
+      `SELECT id, status FROM ${schema}.job${where} ORDER BY id FOR UPDATE`,
+      params,
+    );
+    const ids: number[] = jobs.rows.map((r) => Number(r.id));
+    if (ids.length === 0) {
+      await client.query("COMMIT");
+      return { deleted: [], skipped: 0 };
+    }
+    const steps = await client.query(
+      `SELECT job_id, step_id, status FROM ${schema}.job_step WHERE job_id = ANY($1::int[])
+       ORDER BY job_id, step_id FOR UPDATE`,
+      [ids],
+    );
+    const stepsByJob = new Map<number, { step_id: string; status: string }[]>();
+    for (const row of steps.rows) {
+      const list = stepsByJob.get(Number(row.job_id)) ?? [];
+      list.push({ step_id: row.step_id, status: row.status });
+      stepsByJob.set(Number(row.job_id), list);
+    }
+    const deletable = jobs.rows
+      .filter((r) => deleteBlocker(r.status, stepsByJob.get(Number(r.id)) ?? []) === null)
+      .map((r) => Number(r.id));
+    await deleteJobRows(client, schema, deletable);
+    await client.query("COMMIT");
+    return { deleted: deletable, skipped: ids.length - deletable.length };
   } catch (error) {
     await client.query("ROLLBACK");
     throw error;
