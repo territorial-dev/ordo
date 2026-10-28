@@ -1,3 +1,10 @@
+# [1.12.0](https://github.com/territorial-dev/ordo/compare/v1.11.0...v1.12.0) (2026-10-28)
+
+
+### Features
+
+* DELETE /jobs/:id and DELETE /jobs?key_prefix= for jobs whose steps have not started ([ecdfaa4](https://github.com/territorial-dev/ordo/commit/ecdfaa40ad87101d55556d562e90ff87552c2550))
+
 # [1.11.0](https://github.com/territorial-dev/ordo/compare/v1.10.0...v1.11.0) (2026-10-27)
 
 
