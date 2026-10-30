@@ -1,3 +1,11 @@
+# [1.13.0](https://github.com/territorial-dev/ordo/compare/v1.12.0...v1.13.0) (2026-10-30)
+
+
+### Features
+
+* attempt history and step-level reads (GET /steps/counts, GET /steps/attempts) ([7321fb7](https://github.com/territorial-dev/ordo/commit/7321fb7df35fbf1693961804c7f495cc5b6d7da0))
+* GET /steps/attempts lists failures only in recent, not waits ([52e7769](https://github.com/territorial-dev/ordo/commit/52e7769d20feef332691966e091e4daae1655461))
+
 # [1.12.0](https://github.com/territorial-dev/ordo/compare/v1.11.0...v1.12.0) (2026-10-28)
 
 
