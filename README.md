@@ -254,6 +254,49 @@ How many jobs match, per status, without listing them. Takes the same filters (`
 { "total": 3696, "by_status": { "pending": 3692, "running": 0, "success": 0, "failed": 4 } }
 ```
 
+### GET /steps/counts
+
+The open steps of open jobs, grouped by step type, state and the job's priority: what a dashboard needs to split a backlog by kind of work. Requires the `scheduler` role.
+
+| `state` | Meaning |
+|---|---|
+| `running` | Claimed, lease held |
+| `ready` | Claimable now (capabilities and `max_concurrency` aside): every upstream step it reads from succeeded |
+| `waiting` | An upstream step has not succeeded yet |
+| `cooling` | Pending after a failed attempt, held until `blocked_until` |
+| `blocked` | A `kind: wait` until `blocked_until` |
+
+`retried` counts the steps that already had an attempt before the current one.
+
+```json
+{ "generated_at": "2026-10-30T18:30:00.000Z",
+  "rows": [ { "step_type": "FINALIZE_RUN", "state": "waiting", "priority": 20, "steps": 10198, "retried": 0 } ] }
+```
+
+### GET /steps/attempts
+
+Every attempt that ended since `finished_after` (ISO, default 48 hours back, at most 14 days back; `400` otherwise). A step row keeps only its last state and error; each claim that ends in `complete`, `fail` or a lease expiry also writes one row to `job_step_attempt` (since 1.13), so retries, waits and lost leases can be counted. Requires the `scheduler` role.
+
+| `outcome` | Meaning |
+|---|---|
+| `success` | Completed |
+| `retry` | `kind: error`, back to pending for another attempt |
+| `failed` | Failed for good (attempts exhausted or `retry: false`) |
+| `wait` | `kind: wait`; consumes no attempt |
+| `lease_expired` | The runner stopped heartbeating; the sweeper requeued the step |
+
+`hours` groups by hour, step type, worker (`claimed_by`), outcome and `reason` (the error up to its first `:`, at most 60 characters; null for a success) with the attempt count and the seconds from claim to end. `durations` gives the median and 90th percentile of successful attempts per step type; `recent` the newest 50 attempts that did not succeed, with their error (at most 500 characters) and the job's idempotency key.
+
+```json
+{ "finished_after": "2026-10-28T18:30:00.000Z",
+  "hours": [ { "hour": "2026-10-30T17:00:00.000Z", "step_type": "INGEST_ECMWF", "worker": "pneuma",
+               "outcome": "wait", "reason": "throttled", "attempts": 19, "seconds": 3021.0 } ],
+  "durations": [ { "step_type": "INGEST_ECMWF", "successes": 219, "median_seconds": 366.0, "p90_seconds": 900.2 } ],
+  "recent": [ { "finished_at": "2026-10-30T18:05:46.000Z", "job_id": 29246, "step_id": "table", "step_type": "CALIB_TABLE",
+                "worker": "disbelief", "outcome": "failed", "attempt": 3, "error": "GenericError: …",
+                "idempotency_key": "calib_table:…" } ] }
+```
+
 ### POST /jobs/:id/retry
 
 Requeues a failed job under its own id and idempotency key. The failed step and the steps skipped because of it go back to `pending` with their attempt counters cleared; succeeded steps keep their artifacts, so the job resumes where it broke. The job becomes `pending` with its error cleared. An optional body `{ "priority": 100 }` changes the job's priority at the same time.

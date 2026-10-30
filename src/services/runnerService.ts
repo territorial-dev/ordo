@@ -9,7 +9,7 @@ import {
   StepDefinition,
 } from "../types";
 import { matchesCapabilities } from "../utils/capabilities";
-import { decideFailure, isStepReady, producerOf } from "../utils/readiness";
+import { decideFailure, FailureDecision, isStepReady, producerOf } from "../utils/readiness";
 
 /** Raised for lease mismatches and state conflicts; mapped to HTTP 409. */
 export class ConflictError extends Error {
@@ -48,11 +48,39 @@ interface StepRow {
   job_status: string;
   job_params: Record<string, Record<string, any>> | null;
   idempotency_key: string | null;
+  claimed_by: string | null;
+  claimed_at: Date | null;
   definition: { recipe: StepDefinition[] };
 }
 
+export type AttemptOutcome = "success" | "retry" | "failed" | "wait" | "lease_expired";
+
+/** The attempt's outcome from the failure decision; a swept lease is told apart from a fail. */
+export const attemptOutcome = (next: FailureDecision["next"], expired: boolean): AttemptOutcome => {
+  if (next === "blocked") return "wait";
+  if (next === "failed") return "failed";
+  return expired ? "lease_expired" : "retry";
+};
+
+/** One row per attempt that ended (GET /steps/attempts); written in the step's transaction. */
+const recordAttempt = async (
+  client: PoolClient,
+  schema: string,
+  row: StepRow,
+  outcome: AttemptOutcome,
+  error: string | null,
+): Promise<void> => {
+  await client.query(
+    `INSERT INTO ${schema}.job_step_attempt
+       (job_id, step_id, step_type, attempt, worker, outcome, error, claimed_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [row.job_id, row.step_id, row.step_type, row.attempt, row.claimed_by, outcome, error, row.claimed_at],
+  );
+};
+
 const STEP_SELECT = (schema: string) => `
   SELECT js.job_id, js.step_id, js.step_type, js.status, js.attempt, js.max_concurrency,
+         js.claimed_by, js.claimed_at,
          js.requires, js.lease_seconds, js.lease_token, js.max_attempts AS step_max_attempts,
          se.requires AS exec_requires, se.lease_seconds AS exec_lease_seconds,
          se.max_attempts AS exec_max_attempts, se.executor_ref, se.produces,
@@ -363,6 +391,7 @@ export const completeStep = async (
        WHERE job_id = $1 AND step_id = $2`,
       [jobId, stepId],
     );
+    await recordAttempt(client, schema, row, "success", null);
 
     const jobStatus = await finalizeJobIfDone(client, schema, jobId);
     await client.query("COMMIT");
@@ -407,6 +436,7 @@ export const failStep = async (
   jobId: number,
   stepId: string,
   req: FailRequest,
+  expired = false,
 ): Promise<{ step_status: string; job_status: string; attempt: number }> => {
   const pool = getPool();
   const schema = getSchema();
@@ -433,6 +463,7 @@ export const failStep = async (
 
     let attempt = row.attempt;
     let jobStatus = row.job_status;
+    await recordAttempt(client, schema, row, attemptOutcome(decision.next, expired), message);
 
     if (decision.next === "blocked") {
       // A wait does not consume an attempt.
@@ -501,7 +532,7 @@ export const sweepExpiredLeases = async (): Promise<number> => {
         kind: "error",
         error: "lease expired",
         retry: true,
-      });
+      }, true);
       swept += 1;
     } catch (error) {
       if (!(error instanceof ConflictError)) {
