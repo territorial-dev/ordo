@@ -123,7 +123,7 @@ export interface AttemptsReport {
 
 const seconds = `EXTRACT(EPOCH FROM (finished_at - COALESCE(claimed_at, finished_at)))`;
 
-/** Attempts that ended since `finishedAfter`: per hour, durations of successes, newest failures. */
+/** Attempts that ended since `finishedAfter`: per hour, durations of successes, newest failures (waits are not failures). */
 export const stepAttempts = async (finishedAfter: string): Promise<AttemptsReport> => {
   const pool = getPool();
   const schema = getSchema();
@@ -153,7 +153,7 @@ export const stepAttempts = async (finishedAfter: string): Promise<AttemptsRepor
               left(a.error, 500) AS error, j.idempotency_key
        FROM ${schema}.job_step_attempt a
        JOIN ${schema}.job j ON j.id = a.job_id
-       WHERE a.finished_at >= $1 AND a.outcome <> 'success'
+       WHERE a.finished_at >= $1 AND a.outcome IN ('retry', 'failed', 'lease_expired')
        ORDER BY a.finished_at DESC, a.id DESC
        LIMIT 50`,
       [finishedAfter],

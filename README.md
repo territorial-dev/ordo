@@ -285,7 +285,7 @@ Every attempt that ended since `finished_after` (ISO, default 48 hours back, at 
 | `wait` | `kind: wait`; consumes no attempt |
 | `lease_expired` | The runner stopped heartbeating; the sweeper requeued the step |
 
-`hours` groups by hour, step type, worker (`claimed_by`), outcome and `reason` (the error up to its first `:`, at most 60 characters; null for a success) with the attempt count and the seconds from claim to end. `durations` gives the median and 90th percentile of successful attempts per step type; `recent` the newest 50 attempts that did not succeed, with their error (at most 500 characters) and the job's idempotency key.
+`hours` groups by hour, step type, worker (`claimed_by`), outcome and `reason` (the error up to its first `:`, at most 60 characters; null for a success) with the attempt count and the seconds from claim to end. `durations` gives the median and 90th percentile of successful attempts per step type; `recent` the newest 50 failed attempts (`retry`, `failed`, `lease_expired`; waits are counted in `hours` only), with their error (at most 500 characters) and the job's idempotency key.
 
 ```json
 { "finished_after": "2026-10-28T18:30:00.000Z",

@@ -118,6 +118,7 @@ describe('GET /steps/attempts', () => {
     expect(report.recent[0]).toMatchObject({ finished_at: '2026-10-30T17:30:00.000Z', outcome: 'failed', idempotency_key: 'calib_table:x' });
     for (const c of mockQuery.mock.calls) expect(c[1]).toEqual(['2026-10-28T18:00:00.000Z']);
     expect(sql(mockQuery.mock.calls[0])).toContain("split_part(error, ':', 1)");
+    expect(sql(mockQuery.mock.calls[2])).toContain("a.outcome IN ('retry', 'failed', 'lease_expired')");
   });
 });
 
