@@ -480,7 +480,7 @@ Workers that execute steps over HTTP instead of reading Postgres directly. All r
 }
 ```
 
-Ordo picks one step, atomically (`FOR UPDATE SKIP LOCKED`), that is `pending` or `blocked` with `blocked_until` passed, whose job is still open, whose executor has `runner = 'api'`, whose upstream steps have all succeeded, whose `requires` matches the capabilities, and whose `max_concurrency` is not exhausted. Candidates are considered by job `priority` (highest first), then by job id, then by step id. `step_types` is optional and narrows the claim. The step becomes `running` with the attempt counter advanced, and the job becomes `running` if it was pending. Response `200`:
+Ordo picks one step, atomically (`FOR UPDATE SKIP LOCKED`), that is `pending` or `blocked` with `blocked_until` passed, whose job is still open, whose executor has `runner = 'api'`, whose upstream steps have all succeeded (`step_is_ready(job_id, step_id)`, a SQL function since 1.14, applied before the candidate window of 200 is taken, so steps waiting on another step never fill it), whose `requires` matches the capabilities, and whose `max_concurrency` is not exhausted. Candidates are considered by job `priority` (highest first), then by job id, then by step id. `step_types` is optional and narrows the claim. The step becomes `running` with the attempt counter advanced, and the job becomes `running` if it was pending. Response `200`:
 
 ```json
 {
