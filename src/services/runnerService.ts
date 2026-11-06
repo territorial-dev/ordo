@@ -112,6 +112,10 @@ export const claimStep = async (req: ClaimRequest): Promise<ClaimedStep | null> 
     const stepTypes =
       Array.isArray(req.step_types) && req.step_types.length > 0 ? req.step_types : null;
 
+    // Readiness is part of the window (step_is_ready, migration 011): a step waiting on an
+    // upstream step never takes one of the CANDIDATE_LIMIT places, so a runner whose types
+    // include the second step of a recipe but not the first is not starved by a large backfill.
+    // isStepReady below stays as the guard for an upstream step that changes in between.
     const candidates = await client.query(
       `${STEP_SELECT(schema)}
        WHERE se.runner = 'api'
@@ -119,6 +123,7 @@ export const claimStep = async (req: ClaimRequest): Promise<ClaimedStep | null> 
          AND (js.status = 'pending'
               OR (js.status = 'blocked' AND js.blocked_until IS NOT NULL AND js.blocked_until <= now()))
          AND ($1::text[] IS NULL OR js.step_type = ANY($1::text[]))
+         AND ${schema}.step_is_ready(js.job_id, js.step_id)
        ORDER BY j.priority DESC, js.job_id, js.step_id
        LIMIT ${CANDIDATE_LIMIT}
        FOR UPDATE OF js SKIP LOCKED`,

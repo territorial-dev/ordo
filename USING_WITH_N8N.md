@@ -75,8 +75,29 @@ The workflow starts by atomically claiming a runnable step:
 
 - status is pending or blocked
 - no unmet cooldown (blocked_until)
+- its job is still open (`job.status` in `pending`, `running`)
+- it is ready: `ordo.step_is_ready(job_id, step_id)` (Ordo 1.14) is true when every upstream step it reads from (a `step:<id>.<slot>` input) has succeeded. Claiming without it means taking a step whose inputs are not there yet, validating, and putting it back blocked; with a queue of thousands of waiting steps that loop starves the ready ones.
 - its executor has `runner = 'n8n'` (join `step_executor`); steps of `api` executors belong to HTTP runners and must be left alone
+- higher `job.priority` first, then the older job
 - row is locked using `FOR UPDATE SKIP LOCKED`
+
+```sql
+UPDATE ordo.job_step SET status = 'running', started_at = now(), claimed_at = now(), claimed_by = $1
+WHERE (job_id, step_id) = (
+  SELECT js.job_id, js.step_id
+  FROM ordo.job_step js
+  JOIN ordo.step_executor se ON se.step_type = js.step_type
+  JOIN ordo.job j ON j.id = js.job_id
+  WHERE js.status IN ('pending', 'blocked')
+    AND (js.blocked_until IS NULL OR js.blocked_until <= now())
+    AND j.status IN ('pending', 'running')
+    AND se.runner = 'n8n'
+    AND ordo.step_is_ready(js.job_id, js.step_id)
+  ORDER BY j.priority DESC, js.job_id, js.step_id
+  FOR UPDATE OF js SKIP LOCKED
+  LIMIT 1)
+RETURNING *;
+```
 
 The executor's workflow name is `step_executor.executor_ref`. The old `n8n_workflow` column still exists and is kept equal to `executor_ref` by a database trigger for `n8n` rows, so existing workflows that read it keep working; it is deprecated and will be dropped in a future major. Steps claimed by n8n have a null `lease_token`, so Ordo's lease sweeper never touches them.
 
