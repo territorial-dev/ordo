@@ -1,3 +1,10 @@
+# [1.14.0](https://github.com/territorial-dev/ordo/compare/v1.13.0...v1.14.0) (2026-11-06)
+
+
+### Features
+
+* the claim window holds only ready steps (step_is_ready, migration 011) ([5ec0646](https://github.com/territorial-dev/ordo/commit/5ec06461438c107c7f9d9ae7c690468478a42f3e))
+
 # [1.13.0](https://github.com/territorial-dev/ordo/compare/v1.12.0...v1.13.0) (2026-10-30)
 
 
