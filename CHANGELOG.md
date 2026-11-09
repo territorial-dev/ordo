@@ -1,3 +1,10 @@
+# [1.16.0](https://github.com/territorial-dev/ordo/compare/v1.15.0...v1.16.0) (2026-11-09)
+
+
+### Features
+
+* attempts record what they used (optional usage on complete and fail, GET /steps/usage) ([480a9a5](https://github.com/territorial-dev/ordo/commit/480a9a594b8b734b2a369ff101039646c81db624))
+
 # [1.15.0](https://github.com/territorial-dev/ordo/compare/v1.14.0...v1.15.0) (2026-11-09)
 
 
