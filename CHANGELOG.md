@@ -1,3 +1,10 @@
+# [1.15.0](https://github.com/territorial-dev/ordo/compare/v1.14.0...v1.15.0) (2026-11-09)
+
+
+### Features
+
+* DELETE /jobs removes a failed job none of whose steps succeeded ([45f1143](https://github.com/territorial-dev/ordo/commit/45f11433e3892f6066e86ece77b479d06db55827))
+
 # [1.14.0](https://github.com/territorial-dev/ordo/compare/v1.13.0...v1.14.0) (2026-11-06)
 
 
