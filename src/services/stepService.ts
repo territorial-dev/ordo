@@ -82,8 +82,12 @@ export const ATTEMPTS_DEFAULT_HOURS = 48;
 export const ATTEMPTS_MAX_DAYS = 14;
 
 /** `finished_after` from a query string: default 48 h back, at most 14 days back. */
-export function parseFinishedAfter(value: unknown, now: Date = new Date()): string {
-  if (value === undefined) return new Date(now.getTime() - ATTEMPTS_DEFAULT_HOURS * 3_600_000).toISOString();
+export function parseFinishedAfter(
+  value: unknown,
+  now: Date = new Date(),
+  defaultHours: number = ATTEMPTS_DEFAULT_HOURS,
+): string {
+  if (value === undefined) return new Date(now.getTime() - defaultHours * 3_600_000).toISOString();
   const text = String(value);
   const t = Date.parse(text);
   if (Number.isNaN(t)) throw new StepFilterError(`finished_after must be an ISO timestamp, got ${JSON.stringify(text)}`);
@@ -189,4 +193,86 @@ export const stepAttempts = async (finishedAfter: string): Promise<AttemptsRepor
       idempotency_key: r.idempotency_key ?? null,
     })),
   };
+};
+
+export const USAGE_DEFAULT_HOURS = 7 * 24;
+export const USAGE_DEFAULT_LIMIT = 10_000;
+export const USAGE_MAX_LIMIT = 50_000;
+
+export interface UsageFilter {
+  finished_after: string;
+  step_types: string[];
+  worker: string | null;
+  limit: number;
+}
+
+/** GET /steps/usage query: `finished_after` (default 7 days back, at most 14), `step_type` (one or a comma list), `worker`, `limit`. */
+export function parseUsageFilter(query: Record<string, unknown>, now: Date = new Date()): UsageFilter {
+  const finished_after = parseFinishedAfter(query.finished_after, now, USAGE_DEFAULT_HOURS);
+  const step_types =
+    query.step_type === undefined
+      ? []
+      : String(query.step_type).split(",").map((t) => t.trim()).filter((t) => t.length > 0);
+  const worker = query.worker === undefined || query.worker === "" ? null : String(query.worker);
+  let limit = USAGE_DEFAULT_LIMIT;
+  if (query.limit !== undefined) {
+    limit = Number(query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > USAGE_MAX_LIMIT) {
+      throw new StepFilterError(`limit must be an integer from 1 to ${USAGE_MAX_LIMIT}`);
+    }
+  }
+  return { finished_after, step_types, worker, limit };
+}
+
+export interface UsageRow {
+  finished_at: string;
+  job_id: number;
+  step_id: string;
+  step_type: string;
+  worker: string | null;
+  outcome: string;
+  attempt: number;
+  seconds: number;
+  usage: Record<string, any>;
+}
+
+/** Attempts that carried a `usage` object, newest first, up to `limit`. */
+export const stepUsage = async (
+  filter: UsageFilter,
+): Promise<{ finished_after: string; limit: number; truncated: boolean; rows: UsageRow[] }> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const params: unknown[] = [filter.finished_after];
+  let where = "finished_at >= $1 AND usage IS NOT NULL";
+  if (filter.step_types.length > 0) {
+    params.push(filter.step_types);
+    where += ` AND step_type = ANY($${params.length}::text[])`;
+  }
+  if (filter.worker !== null) {
+    params.push(filter.worker);
+    where += ` AND worker = $${params.length}`;
+  }
+  params.push(filter.limit + 1);
+  const result = await pool.query(
+    `SELECT finished_at, job_id, step_id, step_type, worker, outcome, attempt,
+            ${seconds}::float AS seconds, usage
+     FROM ${schema}.job_step_attempt
+     WHERE ${where}
+     ORDER BY finished_at DESC, id DESC
+     LIMIT $${params.length}`,
+    params,
+  );
+  const truncated = result.rows.length > filter.limit;
+  const rows = result.rows.slice(0, filter.limit).map((r) => ({
+    finished_at: r.finished_at instanceof Date ? r.finished_at.toISOString() : String(r.finished_at),
+    job_id: Number(r.job_id),
+    step_id: r.step_id,
+    step_type: r.step_type,
+    worker: r.worker ?? null,
+    outcome: r.outcome,
+    attempt: Number(r.attempt),
+    seconds: Math.round(Number(r.seconds) * 10) / 10,
+    usage: r.usage,
+  }));
+  return { finished_after: filter.finished_after, limit: filter.limit, truncated, rows };
 };

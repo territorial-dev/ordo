@@ -95,11 +95,27 @@ export const completeHandler = async (req: Request, res: Response): Promise<void
         return;
       }
     }
+    const usageError = checkUsage(body.usage);
+    if (usageError) {
+      res.status(400).json({ error: usageError });
+      return;
+    }
     const result = await completeStep(ref.jobId, ref.stepId, body);
     res.json(result);
   } catch (error) {
     handleError(res, error, "complete");
   }
+};
+
+/** Largest `usage` object accepted, in bytes of JSON. */
+export const USAGE_MAX_BYTES = 4096;
+
+/** `usage` is optional; when present it must be a JSON object of at most 4 KB. */
+export const checkUsage = (usage: unknown): string | null => {
+  if (usage === undefined || usage === null) return null;
+  if (typeof usage !== "object" || Array.isArray(usage)) return "usage must be an object";
+  if (JSON.stringify(usage).length > USAGE_MAX_BYTES) return `usage must be at most ${USAGE_MAX_BYTES} bytes of JSON`;
+  return null;
 };
 
 export const failHandler = async (req: Request, res: Response): Promise<void> => {
@@ -117,6 +133,11 @@ export const failHandler = async (req: Request, res: Response): Promise<void> =>
     }
     if (body.kind === "wait" && !(typeof body.cooldown_seconds === "number" && body.cooldown_seconds > 0)) {
       res.status(400).json({ error: "cooldown_seconds (positive number) is required for kind \"wait\"" });
+      return;
+    }
+    const usageError = checkUsage(body.usage);
+    if (usageError) {
+      res.status(400).json({ error: usageError });
       return;
     }
     const result = await failStep(ref.jobId, ref.stepId, body);

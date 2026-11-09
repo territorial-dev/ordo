@@ -14,7 +14,8 @@ vi.mock('../../src/db/connection', () => ({
 }));
 
 import { attemptOutcome, completeStep, failStep } from '../../src/services/runnerService';
-import { parseFinishedAfter, stepAttempts, stepCounts, StepFilterError } from '../../src/services/stepService';
+import { parseFinishedAfter, parseUsageFilter, stepAttempts, stepCounts, StepFilterError, stepUsage } from '../../src/services/stepService';
+import { checkUsage } from '../../src/controllers/runnerController';
 
 const sql = (c: unknown[]) => String(c[0]).replace(/\s+/g, ' ').trim();
 const claimedAt = new Date('2026-10-30T17:00:00Z');
@@ -63,7 +64,7 @@ describe('recording attempts', () => {
     await completeStep(7, 'ingest', { lease_token: 'tok', artifacts: {} });
     const rows = attemptInserts();
     expect(rows).toHaveLength(1);
-    expect(rows[0][1]).toEqual([7, 'ingest', 'INGEST_ECMWF', 2, 'pneuma', 'success', null, claimedAt]);
+    expect(rows[0][1]).toEqual([7, 'ingest', 'INGEST_ECMWF', 2, 'pneuma', 'success', null, claimedAt, null]);
     const calls = mockQuery.mock.calls.map(sql);
     expect(calls.indexOf('BEGIN')).toBeLessThan(calls.findIndex((c) => c.startsWith('INSERT INTO test.job_step_attempt')));
     expect(calls[calls.length - 1]).toBe('COMMIT');
@@ -130,5 +131,58 @@ describe('GET /steps/counts', () => {
     const text = sql(mockQuery.mock.calls[0]);
     expect(text).toContain("j.status IN ('pending', 'running')");
     expect(text).toContain("i.value LIKE 'step:%'");
+  });
+});
+
+describe('attempt usage (migration 012)', () => {
+  it('stores the usage object with a success and with a wait, null when absent', async () => {
+    const usage = { v: 1, price_gb: 1, rss_peak_mb: 812.5, solo: true };
+    db(stepRow());
+    await completeStep(7, 'ingest', { lease_token: 'tok', artifacts: {}, usage });
+    db(stepRow({ attempt: 1 }));
+    await failStep(7, 'ingest', { lease_token: 'tok', kind: 'wait', error: 'no room: 1.0 GB', cooldown_seconds: 60, usage });
+    db(stepRow({ attempt: 1 }));
+    await failStep(7, 'ingest', { lease_token: 'tok', kind: 'error', error: 'boom' });
+    const rows = attemptInserts().map((c) => c[1][8]);
+    expect(rows).toEqual([JSON.stringify(usage), JSON.stringify(usage), null]);
+  });
+
+  it('checks the usage field: optional, an object, at most 4 KB', () => {
+    expect(checkUsage(undefined)).toBeNull();
+    expect(checkUsage(null)).toBeNull();
+    expect(checkUsage({ v: 1 })).toBeNull();
+    expect(checkUsage([1, 2])).toMatch(/object/);
+    expect(checkUsage('x')).toMatch(/object/);
+    expect(checkUsage({ big: 'x'.repeat(5000) })).toMatch(/4096/);
+  });
+});
+
+describe('GET /steps/usage', () => {
+  const now = new Date('2026-11-09T20:00:00Z');
+
+  it('defaults to 7 days and 10,000 rows, splits step types, refuses a bad limit', () => {
+    expect(parseUsageFilter({}, now)).toEqual({
+      finished_after: '2026-11-02T20:00:00.000Z', step_types: [], worker: null, limit: 10000,
+    });
+    expect(parseUsageFilter({ step_type: 'HARMONIZE, CALIB_TABLE', worker: 'pneuma', limit: '5' }, now)).toMatchObject({
+      step_types: ['HARMONIZE', 'CALIB_TABLE'], worker: 'pneuma', limit: 5,
+    });
+    expect(() => parseUsageFilter({ limit: '0' }, now)).toThrow(StepFilterError);
+    expect(() => parseUsageFilter({ limit: '50001' }, now)).toThrow(StepFilterError);
+    expect(() => parseUsageFilter({ finished_after: '2026-10-01T00:00:00Z' }, now)).toThrow(StepFilterError);
+  });
+
+  it('reads attempts with usage only, filters, and reports truncation', async () => {
+    const row = { finished_at: new Date('2026-11-09T19:00:00Z'), job_id: '3', step_id: 'h', step_type: 'HARMONIZE', worker: 'disbelief', outcome: 'success', attempt: 1, seconds: '80.04', usage: { v: 1 } };
+    mockQuery.mockResolvedValueOnce({ rows: [row, row, row] });
+    const out = await stepUsage({ finished_after: '2026-11-02T20:00:00.000Z', step_types: ['HARMONIZE'], worker: 'disbelief', limit: 2 });
+    expect(out.truncated).toBe(true);
+    expect(out.rows).toHaveLength(2);
+    expect(out.rows[0]).toEqual({ finished_at: '2026-11-09T19:00:00.000Z', job_id: 3, step_id: 'h', step_type: 'HARMONIZE', worker: 'disbelief', outcome: 'success', attempt: 1, seconds: 80, usage: { v: 1 } });
+    const text = sql(mockQuery.mock.calls[0]);
+    expect(text).toContain('usage IS NOT NULL');
+    expect(text).toContain('step_type = ANY($2::text[])');
+    expect(text).toContain('worker = $3');
+    expect(mockQuery.mock.calls[0][1]).toEqual(['2026-11-02T20:00:00.000Z', ['HARMONIZE'], 'disbelief', 3]);
   });
 });

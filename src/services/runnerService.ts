@@ -69,12 +69,16 @@ const recordAttempt = async (
   row: StepRow,
   outcome: AttemptOutcome,
   error: string | null,
+  usage: Record<string, any> | null = null,
 ): Promise<void> => {
   await client.query(
     `INSERT INTO ${schema}.job_step_attempt
-       (job_id, step_id, step_type, attempt, worker, outcome, error, claimed_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
-    [row.job_id, row.step_id, row.step_type, row.attempt, row.claimed_by, outcome, error, row.claimed_at],
+       (job_id, step_id, step_type, attempt, worker, outcome, error, claimed_at, usage)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)`,
+    [
+      row.job_id, row.step_id, row.step_type, row.attempt, row.claimed_by, outcome, error, row.claimed_at,
+      usage ? JSON.stringify(usage) : null,
+    ],
   );
 };
 
@@ -396,7 +400,7 @@ export const completeStep = async (
        WHERE job_id = $1 AND step_id = $2`,
       [jobId, stepId],
     );
-    await recordAttempt(client, schema, row, "success", null);
+    await recordAttempt(client, schema, row, "success", null, req.usage ?? null);
 
     const jobStatus = await finalizeJobIfDone(client, schema, jobId);
     await client.query("COMMIT");
@@ -468,7 +472,7 @@ export const failStep = async (
 
     let attempt = row.attempt;
     let jobStatus = row.job_status;
-    await recordAttempt(client, schema, row, attemptOutcome(decision.next, expired), message);
+    await recordAttempt(client, schema, row, attemptOutcome(decision.next, expired), message, req.usage ?? null);
 
     if (decision.next === "blocked") {
       // A wait does not consume an attempt.

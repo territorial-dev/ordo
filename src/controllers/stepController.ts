@@ -1,5 +1,12 @@
 import { Request, Response } from "express";
-import { parseFinishedAfter, stepAttempts, stepCounts, StepFilterError } from "../services/stepService";
+import {
+  parseFinishedAfter,
+  parseUsageFilter,
+  stepAttempts,
+  stepCounts,
+  StepFilterError,
+  stepUsage,
+} from "../services/stepService";
 
 export const stepCountsHandler = async (_req: Request, res: Response): Promise<void> => {
   try {
@@ -19,6 +26,19 @@ export const stepAttemptsHandler = async (req: Request, res: Response): Promise<
       return;
     }
     console.error("Error reading step attempts:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+export const stepUsageHandler = async (req: Request, res: Response): Promise<void> => {
+  try {
+    res.json(await stepUsage(parseUsageFilter(req.query as Record<string, unknown>)));
+  } catch (error) {
+    if (error instanceof StepFilterError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    console.error("Error reading step usage:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

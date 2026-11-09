@@ -297,6 +297,17 @@ Every attempt that ended since `finished_after` (ISO, default 48 hours back, at 
                 "idempotency_key": "calib_table:…" } ] }
 ```
 
+### GET /steps/usage
+
+The attempts that carried a `usage` object (since 1.16), newest first. Query: `finished_after` (ISO, default 7 days back, at most 14 days back), `step_type` (one type or a comma list), `worker` (`claimed_by`), `limit` (1 to 50,000, default 10,000; `truncated` says whether more rows matched). Requires the `scheduler` role.
+
+```json
+{ "finished_after": "2026-11-02T20:00:00.000Z", "limit": 10000, "truncated": false,
+  "rows": [ { "finished_at": "2026-11-09T19:00:00.000Z", "job_id": 812, "step_id": "harmonize",
+              "step_type": "HARMONIZE", "worker": "disbelief", "outcome": "success", "attempt": 1,
+              "seconds": 80.0, "usage": { "v": 1, "price_gb": 1.0, "rss_peak_mb": 812.5 } } ] }
+```
+
 ### POST /jobs/:id/retry
 
 Requeues a failed job under its own id and idempotency key. The failed step and the steps skipped because of it go back to `pending` with their attempt counters cleared; succeeded steps keep their artifacts, so the job resumes where it broke. The job becomes `pending` with its error cleared. An optional body `{ "priority": 100 }` changes the job's priority at the same time.
@@ -517,6 +528,8 @@ Ordo picks one step, atomically (`FOR UPDATE SKIP LOCKED`), that is `pending` or
 - `kind: wait`: the step becomes `blocked` until `now + cooldown_seconds` (required) and the attempt counter is handed back, so waiting for a late input never burns a retry.
 
 Returns `{ "step_status": "…", "job_status": "…", "attempt": n }`. Both kinds release the lease.
+
+**`usage` (since 1.16, optional on `complete` and `fail`).** A JSON object of at most 4 KB describing what the attempt used (memory, CPU, time), as the runner measured it, for example `"usage": { "v": 1, "price_gb": 1.0, "rss_peak_mb": 812.5, "thread_cpu_s": 41.2 }`. Ordo does not interpret it: it is stored with the attempt's row (`job_step_attempt.usage`, migration 012) and read back by `GET /steps/usage`. Anything else than an object, or a larger one, answers `400`. Older runners send nothing and the column stays null.
 
 ### Sweeper
 
