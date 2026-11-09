@@ -231,6 +231,8 @@ export interface ClaimedStep {
 export interface CompleteRequest {
   lease_token: string;
   artifacts: Record<string, { type: string; uri: string; hash: string; metadata?: Record<string, any> }>;
+  /** What the attempt used, as the runner measured it; stored with the attempt row as is. */
+  usage?: Record<string, any>;
 }
 
 export interface FailRequest {
@@ -239,4 +241,6 @@ export interface FailRequest {
   error?: string;
   retry?: boolean;
   cooldown_seconds?: number;
+  /** What the attempt used, as the runner measured it; stored with the attempt row as is. */
+  usage?: Record<string, any>;
 }

@@ -55,7 +55,7 @@ import {
   failHandler,
   heartbeatHandler,
 } from "./controllers/runnerController";
-import { stepAttemptsHandler, stepCountsHandler } from "./controllers/stepController";
+import { stepAttemptsHandler, stepUsageHandler, stepCountsHandler } from "./controllers/stepController";
 import { closePool } from "./db/connection";
 import { runMigrations } from "./db/migrations";
 import { startSweeper } from "./services/runnerService";
@@ -124,6 +124,7 @@ app.delete("/jobs", deleteJobsHandler);
 // Step endpoints (read-only): open steps by type and state, attempts that ended
 app.get("/steps/counts", stepCountsHandler);
 app.get("/steps/attempts", stepAttemptsHandler);
+app.get("/steps/usage", stepUsageHandler);
 
 // Artifact endpoints
 app.get("/artifacts", listArtifactsHandler);
