@@ -13,7 +13,7 @@ vi.mock('../../src/db/connection', () => ({
   getSchema: () => 'test',
 }));
 
-import { deleteBlocker, DELETABLE_STEP_STATUSES } from '../../src/utils/jobs';
+import { deleteBlocker, DELETABLE_STEP_STATUSES, DELETABLE_FAILED_STEP_STATUSES } from '../../src/utils/jobs';
 import { deleteJob, deleteJobs, JobFilterError } from '../../src/services/jobService';
 import { ConflictError } from '../../src/services/runnerService';
 
@@ -38,9 +38,22 @@ describe('deleteBlocker', () => {
   });
 
   it('refuses finished jobs whatever their steps say', () => {
-    for (const status of ['success', 'completed', 'failed', 'partial']) {
-      expect(deleteBlocker(status, [{ step_id: 'a', status: 'pending' }])).toBe(`Job is ${status}, not pending`);
+    for (const status of ['success', 'completed', 'partial']) {
+      expect(deleteBlocker(status, [{ step_id: 'a', status: 'pending' }])).toBe(`Job is ${status}, not pending or failed`);
     }
+  });
+
+  it('allows a failed job none of whose steps succeeded or is running', () => {
+    expect(DELETABLE_FAILED_STEP_STATUSES).toEqual(new Set(['pending', 'blocked', 'failed', 'skipped']));
+    expect(deleteBlocker('failed', [{ step_id: 'ingest', status: 'failed' }, { step_id: 'finalize', status: 'skipped' }])).toBeNull();
+    expect(deleteBlocker('failed', [{ step_id: 'a', status: 'pending' }, { step_id: 'b', status: 'blocked' }])).toBeNull();
+  });
+
+  it('keeps a failed job that recorded an artifact or still runs a step', () => {
+    expect(deleteBlocker('failed', [{ step_id: 'ingest', status: 'success' }, { step_id: 'finalize', status: 'failed' }]))
+      .toBe('Step ingest is success; a failed job is deleted only when no step succeeded');
+    expect(deleteBlocker('failed', [{ step_id: 'a', status: 'failed' }, { step_id: 'b', status: 'running' }]))
+      .toBe('Step b is running; a failed job is deleted only when no step succeeded');
   });
 });
 
