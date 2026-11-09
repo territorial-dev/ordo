@@ -312,13 +312,13 @@ Job-level outputs declare which artifacts should be finalized after a job comple
 
 ### DELETE /jobs/:id
 
-Deletes a job none of whose steps has started: every step is `pending` or `blocked` (waiting for an input) and the job is still open. Anything that ran, failed or finished stays, so no artifact ever loses its record; a finished job is history, not queue. The job's steps, artifacts, outputs and step detailing go with it, in one transaction. The step rows are locked first, so a runner claiming at the same moment skips them.
+Deletes a job none of whose steps has started: every step is `pending` or `blocked` (waiting for an input) and the job is still open. A **failed** job is deletable too when none of its steps succeeded or is running (its steps are `pending`, `blocked`, `failed` or `skipped`): it produced nothing, and a client that knows it can never succeed (an input that will never exist) removes it instead of leaving it failed for ever. A job with a succeeded step, and every finished job, stays, so no artifact ever loses its record; a finished job is history, not queue. The job's steps, artifacts, outputs, step detailing and attempt history go with it, in one transaction. The step rows are locked first, so a runner claiming at the same moment skips them.
 
-**Response** `200`: `{ "id": 812, "idempotency_key": "ingest_ecmwf:20240201T00Z:oper:precip:1.0.0", "deleted": true }`. `404` when the job does not exist, `409` with the reason (`Step harmonize is running, not pending`) when it cannot be deleted. Requires the `scheduler` role (admins included).
+**Response** `200`: `{ "id": 812, "idempotency_key": "ingest_ecmwf:20240201T00Z:oper:precip:1.0.0", "deleted": true }`. `404` when the job does not exist, `409` with the reason (`Step harmonize is running, not pending`; `Step ingest is success; a failed job is deleted only when no step succeeded`) when it cannot be deleted. Requires the `scheduler` role (admins included).
 
 ### DELETE /jobs?key_prefix=…
 
-The bulk form: deletes every matching job none of whose steps has started and reports the rest as skipped, in one transaction. Takes the same filters as `GET /jobs` (`order` and `limit` are ignored); `key_prefix` is required, so a call can never empty the table by accident (`400` without it). Use `GET /jobs/counts` with the same filters first to see what a prefix covers.
+The bulk form: deletes every matching job the rule above allows (an open job none of whose steps has started, a failed job none of whose steps succeeded) and reports the rest as skipped, in one transaction. Takes the same filters as `GET /jobs` (`order` and `limit` are ignored); `key_prefix` is required, so a call can never empty the table by accident (`400` without it). Use `GET /jobs/counts` with the same filters first to see what a prefix covers.
 
 ```json
 { "deleted": [801, 802, 805], "skipped": 2 }
