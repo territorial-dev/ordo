@@ -245,3 +245,16 @@ Finalization is performed once per job.
 - No execution logic lives in the API
 
 Following these rules keeps the system predictable, debuggable, and scalable.
+
+## Cancelled jobs (Ordo 1.17)
+
+`POST /jobs/:id/cancel` marks the job and its unfinished steps `cancelled` and clears the delivered outputs (`delivered_uri`). It does not stop anything that is running: the runner does.
+
+- **Claiming.** The claim above already filters on `j.status IN ('pending', 'running')`, so no step of a cancelled job is claimed.
+- **Running steps.** Ordo cannot reach an n8n execution. Steps claimed through the runner API (`runner = 'api'`) learn of the cancel from the `409 Job <id> was cancelled` on their next heartbeat; steps claimed straight from Postgres must poll for `job.status = 'cancelled'` with steps the workflow still runs. Either way, stop the **executor's** execution first (n8n public API `POST /api/v1/executions/:id/stop`; an Execute Command node kills its process when its execution is stopped), then the calling workflow's. Stopping only the caller leaves the sub-workflow and its processes running.
+- **Error workflows.** A stopped execution fails with `ManualExecutionCancelledError` ("The execution was cancelled manually"), and error workflows fire for it. Filter that error out of alerting.
+- **Withdrawn deliveries.** The cancel response and `job_output` (now with `delivered_uri` null) tell what to remove: copies written under each output `path` since the job was created.
+
+## Delivering outputs at the end of a step (Ordo 1.17)
+
+A runner using the runner API receives `deliver` with each claim: the job's declared outputs that the step produces, with their destination `path`. Copy each one there before `complete`, and send where it went in `delivered` (keyed by slot); Ordo records `job_output.delivered_uri`. The job then reaches `success` with all of its outputs delivered, and no separate finalizer is needed for delivery. `on_exit` is still the runner's: run it when `complete` or `fail` returns a finished `job_status`.

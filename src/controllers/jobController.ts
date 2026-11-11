@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { countJobs, createJob, deleteJob, deleteJobs, getJobStatus, getJobsBatch, JobFilterError, listJobs, parseJobFilter, retryJob } from "../services/jobService";
+import { cancelJob, countJobs, createJob, deleteJob, deleteJobs, getJobStatus, getJobsBatch, JobFilterError, listJobs, parseJobFilter, retryJob } from "../services/jobService";
 import { ConflictError } from "../services/runnerService";
 import { CreateJobRequest } from "../types";
 import { parsePriority } from "../utils/jobs";
@@ -270,6 +270,53 @@ export const getJobStatusHandler = async (
   }
 };
 
+
+/** Longest cancel reason accepted, in characters. */
+export const CANCEL_REASON_MAX = 500;
+
+/** `reason` is optional; when present it must be a string of at most CANCEL_REASON_MAX characters. */
+export const parseCancelReason = (value: unknown): string | undefined => {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== "string") throw new RangeError("reason must be a string");
+  const reason = value.trim();
+  if (reason.length > CANCEL_REASON_MAX) {
+    throw new RangeError(`reason must be at most ${CANCEL_REASON_MAX} characters`);
+  }
+  return reason.length > 0 ? reason : undefined;
+};
+
+export const cancelJobHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  const jobId = parseInt(req.params.id, 10);
+  if (isNaN(jobId)) {
+    res.status(400).json({ error: "Invalid job ID" });
+    return;
+  }
+  let reason: string | undefined;
+  try {
+    reason = parseCancelReason(req.body?.reason);
+  } catch (error) {
+    res.status(400).json({ error: (error as Error).message });
+    return;
+  }
+  try {
+    const result = await cancelJob(jobId, reason);
+    if (!result) {
+      res.status(404).json({ error: "Job not found" });
+      return;
+    }
+    res.json(result);
+  } catch (error) {
+    if (error instanceof ConflictError) {
+      res.status(409).json({ error: error.message });
+      return;
+    }
+    console.error("Error cancelling job:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
 
 export const deleteJobHandler = async (
   req: Request,

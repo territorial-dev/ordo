@@ -19,15 +19,42 @@ export const parsePriority = (value: unknown): number | undefined => {
   return value;
 };
 
-/** Step statuses that a retry resets to `pending`: the failed step and the ones skipped because of it. */
-export const RETRY_RESET_STATUSES: ReadonlySet<string> = new Set(["failed", "skipped"]);
+/**
+ * Step statuses that a retry resets to `pending`: the failed step, the ones skipped because of
+ * it, and the ones a cancel stopped.
+ */
+export const RETRY_RESET_STATUSES: ReadonlySet<string> = new Set(["failed", "skipped", "cancelled"]);
 
-/** Which steps of a failed job a retry resets. Succeeded steps keep their artifacts. */
-export const stepsToReset = (steps: ReadonlyArray<{ step_id: string; status: string }>): string[] =>
-  steps.filter((s) => RETRY_RESET_STATUSES.has(s.status)).map((s) => s.step_id);
+/**
+ * Which steps a retry resets. Succeeded steps keep their artifacts, except the ones listed in
+ * `redeliver`: a cancel withdraws what the job delivered, so a retried cancelled job runs again
+ * the succeeded steps that produce a declared output, to deliver it again.
+ */
+export const stepsToReset = (
+  steps: ReadonlyArray<{ step_id: string; status: string }>,
+  redeliver: ReadonlySet<string> = new Set(),
+): string[] =>
+  steps
+    .filter((s) => RETRY_RESET_STATUSES.has(s.status) || (s.status === "success" && redeliver.has(s.step_id)))
+    .map((s) => s.step_id);
+
+/** Job statuses a retry accepts. */
+export const RETRYABLE_JOB_STATUSES: ReadonlySet<string> = new Set(["failed", "cancelled"]);
 
 /** Whether a job in this status may be retried. */
-export const canRetry = (jobStatus: string): boolean => jobStatus === "failed";
+export const canRetry = (jobStatus: string): boolean => RETRYABLE_JOB_STATUSES.has(jobStatus);
+
+/** Job statuses a cancel accepts: the job is still open. */
+export const CANCELLABLE_JOB_STATUSES: ReadonlySet<string> = new Set(["pending", "running"]);
+
+/** Step statuses a cancel stops: everything that has not finished. */
+export const CANCELLED_STEP_STATUSES: ReadonlySet<string> = new Set(["pending", "blocked", "running"]);
+
+/** Why a job cannot be cancelled, or null when it can (a cancelled job is cancelled again as a no-op). */
+export const cancelBlocker = (jobStatus: string): string | null => {
+  if (CANCELLABLE_JOB_STATUSES.has(jobStatus) || jobStatus === "cancelled") return null;
+  return `Job is ${jobStatus}, not pending or running`;
+};
 
 /** Step statuses under which nothing has run yet: a job made only of these may be deleted. */
 export const DELETABLE_STEP_STATUSES: ReadonlySet<string> = new Set(["pending", "blocked"]);
@@ -38,12 +65,13 @@ export const DELETABLE_FAILED_STEP_STATUSES: ReadonlySet<string> = new Set([
   "blocked",
   "failed",
   "skipped",
+  "cancelled",
 ]);
 
 /**
  * Why a job cannot be deleted, or null when it can. An open job is deletable while none of its
- * steps has started: every step is `pending` or `blocked` (waiting for an input). A failed job
- * is deletable while none of its steps succeeded or is running: it produced nothing, and a
+ * steps has started: every step is `pending` or `blocked` (waiting for an input). A failed or
+ * cancelled job is deletable while none of its steps succeeded or is running: it produced nothing, and a
  * client that knows it can never succeed (an input that will never exist) removes it instead of
  * leaving it failed for ever. A job with a succeeded step, and every finished job, stays, so no
  * artifact ever loses its record.
@@ -52,9 +80,9 @@ export const deleteBlocker = (
   jobStatus: string,
   steps: ReadonlyArray<{ step_id: string; status: string }>,
 ): string | null => {
-  if (jobStatus === "failed") {
+  if (jobStatus === "failed" || jobStatus === "cancelled") {
     const kept = steps.find((s) => !DELETABLE_FAILED_STEP_STATUSES.has(s.status));
-    if (kept) return `Step ${kept.step_id} is ${kept.status}; a failed job is deleted only when no step succeeded`;
+    if (kept) return `Step ${kept.step_id} is ${kept.status}; a ${jobStatus} job is deleted only when no step succeeded`;
     return null;
   }
   if (jobStatus !== "pending" && jobStatus !== "running") {

@@ -19,8 +19,10 @@ import {
 } from "./jobStepDetailingService";
 import { ValidationError } from "../utils/validation";
 import { computeJobProgressPercentage } from "../utils/progress";
-import { canRetry, deleteBlocker } from "../utils/jobs";
+import { cancelBlocker, canRetry, CANCELLED_STEP_STATUSES, deleteBlocker, stepsToReset } from "../utils/jobs";
+import { producersOf } from "../utils/delivery";
 import { ConflictError } from "./runnerService";
+import { CancelJobResult, StepDefinition } from "../types";
 
 export interface CreateJobResult {
   id: number;
@@ -571,7 +573,7 @@ export const getJobsBatch = async (
   return result;
 };
 
-export const JOB_STATUSES = ["pending", "running", "success", "failed"] as const;
+export const JOB_STATUSES = ["pending", "running", "success", "failed", "cancelled"] as const;
 export const MAX_LIST_LIMIT = 100_000;
 
 /**
@@ -734,10 +736,12 @@ export interface RetryJobResult {
 }
 
 /**
- * Requeues a failed job under its own id and idempotency key: the failed step and the steps
- * skipped because of it go back to `pending` with the attempt counter cleared; succeeded
- * steps keep their artifacts, so the job resumes where it broke. Returns null when the job
- * does not exist and throws ConflictError when it is not failed.
+ * Requeues a failed or cancelled job under its own id and idempotency key: the failed step,
+ * the steps skipped because of it and the steps a cancel stopped go back to `pending` with the
+ * attempt counter cleared; succeeded steps keep their artifacts, so the job resumes where it
+ * broke. A cancel withdraws what the job delivered, so for a cancelled job the succeeded steps
+ * that produce a declared output run again too. Returns null when the job does not exist and
+ * throws ConflictError when it is neither failed nor cancelled.
  */
 export const retryJob = async (
   jobId: number,
@@ -757,16 +761,36 @@ export const retryJob = async (
       return null;
     }
     if (!canRetry(job.rows[0].status)) {
-      throw new ConflictError(`Job is ${job.rows[0].status}, not failed`);
+      throw new ConflictError(`Job is ${job.rows[0].status}, not failed or cancelled`);
     }
+    const steps = await client.query(
+      `SELECT step_id, status FROM ${schema}.job_step WHERE job_id = $1 ORDER BY step_id FOR UPDATE`,
+      [jobId],
+    );
+    let redeliver = new Set<string>();
+    if (job.rows[0].status === "cancelled") {
+      const declared = await client.query(
+        `SELECT o.artifact_name, r.definition
+         FROM ${schema}.job_output o
+         JOIN ${schema}.job j ON j.id = o.job_id
+         JOIN ${schema}.recipe r ON r.id = j.recipe_id
+         WHERE o.job_id = $1 AND o.delivered_uri IS NULL`,
+        [jobId],
+      );
+      if (declared.rows.length > 0) {
+        const recipe: StepDefinition[] = declared.rows[0].definition?.recipe ?? [];
+        redeliver = producersOf(recipe, declared.rows.map((r) => r.artifact_name));
+      }
+    }
+    const toReset = stepsToReset(steps.rows, redeliver);
     const reset = await client.query(
       `UPDATE ${schema}.job_step
        SET status = 'pending', attempt = 0, error = NULL, claimed_by = NULL, claimed_at = NULL,
            started_at = NULL, finished_at = NULL, lease_token = NULL, lease_expires_at = NULL,
            blocked_until = NULL
-       WHERE job_id = $1 AND status IN ('failed', 'skipped')
+       WHERE job_id = $1 AND step_id = ANY($2::text[])
        RETURNING step_id`,
-      [jobId],
+      [jobId, toReset],
     );
     const newPriority = priority ?? job.rows[0].priority ?? 0;
     await client.query(
@@ -781,6 +805,99 @@ export const retryJob = async (
       status: "pending",
       priority: newPriority,
       steps_reset: reset.rows.map((r) => r.step_id),
+    };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};
+
+/**
+ * Cancels an open job: the job and every step that has not finished (pending, blocked or
+ * running) become `cancelled`, running steps lose their lease (so an `api` runner gets 409 on
+ * its next heartbeat, complete or fail), each running attempt is recorded with the outcome
+ * `cancelled`, and outputs already delivered are withdrawn (delivered_uri cleared; the runner
+ * removes the copies). Cancelling a cancelled job changes nothing. Returns null when the job
+ * does not exist and throws ConflictError when it already finished.
+ */
+export const cancelJob = async (jobId: number, reason?: string): Promise<CancelJobResult | null> => {
+  const pool = getPool();
+  const schema = getSchema();
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    const job = await client.query(
+      `SELECT id, status FROM ${schema}.job WHERE id = $1 FOR UPDATE`,
+      [jobId],
+    );
+    if (job.rows.length === 0) {
+      await client.query("ROLLBACK");
+      return null;
+    }
+    const status: string = job.rows[0].status;
+    const blocker = cancelBlocker(status);
+    if (blocker) throw new ConflictError(blocker);
+    if (status === "cancelled") {
+      await client.query("COMMIT");
+      return { id: jobId, status: "cancelled", already_cancelled: true, steps_cancelled: [], running: [], withdrawn: [] };
+    }
+
+    const steps = await client.query(
+      `SELECT step_id, step_type, status, attempt, claimed_by, claimed_at
+       FROM ${schema}.job_step WHERE job_id = $1 ORDER BY step_id FOR UPDATE`,
+      [jobId],
+    );
+    const open = steps.rows.filter((s) => CANCELLED_STEP_STATUSES.has(s.status));
+    const running = open.filter((s) => s.status === "running");
+    const message = reason ? `cancelled: ${reason}` : "cancelled";
+
+    for (const s of running) {
+      await client.query(
+        `INSERT INTO ${schema}.job_step_attempt
+           (job_id, step_id, step_type, attempt, worker, outcome, error, claimed_at)
+         VALUES ($1, $2, $3, $4, $5, 'cancelled', $6, $7)`,
+        [jobId, s.step_id, s.step_type, s.attempt, s.claimed_by, message, s.claimed_at],
+      );
+    }
+    await client.query(
+      `UPDATE ${schema}.job_step
+       SET status = 'cancelled', finished_at = now(), error = $3,
+           lease_token = NULL, lease_expires_at = NULL, blocked_until = NULL
+       WHERE job_id = $1 AND step_id = ANY($2::text[])`,
+      [jobId, open.map((s) => s.step_id), message],
+    );
+    const withdrawn = await client.query(
+      `WITH old AS (
+         SELECT artifact_name, delivered_uri FROM ${schema}.job_output
+         WHERE job_id = $1 AND delivered_uri IS NOT NULL FOR UPDATE
+       )
+       UPDATE ${schema}.job_output o
+       SET delivered_uri = NULL, delivered_at = NULL
+       FROM old
+       WHERE o.job_id = $1 AND o.artifact_name = old.artifact_name
+       RETURNING o.artifact_name, o.path, old.delivered_uri`,
+      [jobId],
+    );
+    await client.query(
+      `UPDATE ${schema}.job
+       SET status = 'cancelled', finished_at = now(), error = $2
+       WHERE id = $1`,
+      [jobId, message],
+    );
+    await client.query("COMMIT");
+    return {
+      id: jobId,
+      status: "cancelled",
+      already_cancelled: false,
+      steps_cancelled: open.map((s) => s.step_id),
+      running: running.map((s) => ({ step_id: s.step_id, step_type: s.step_type, claimed_by: s.claimed_by ?? null })),
+      withdrawn: withdrawn.rows.map((r) => ({
+        artifact_name: r.artifact_name,
+        path: r.path,
+        delivered_uri: r.delivered_uri,
+      })),
     };
   } catch (error) {
     await client.query("ROLLBACK");

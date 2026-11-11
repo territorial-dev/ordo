@@ -10,6 +10,7 @@ import {
 } from "../types";
 import { matchesCapabilities } from "../utils/capabilities";
 import { decideFailure, FailureDecision, isStepReady, producerOf } from "../utils/readiness";
+import { checkDelivered, Deliverable, deliverablesForStep } from "../utils/delivery";
 
 /** Raised for lease mismatches and state conflicts; mapped to HTTP 409. */
 export class ConflictError extends Error {
@@ -53,7 +54,11 @@ interface StepRow {
   definition: { recipe: StepDefinition[] };
 }
 
-export type AttemptOutcome = "success" | "retry" | "failed" | "wait" | "lease_expired";
+export type AttemptOutcome = "success" | "retry" | "failed" | "wait" | "lease_expired" | "cancelled";
+
+/** The 409 a runner gets for a step of a cancelled job: it must stop the work and not retry. */
+export const cancelledConflict = (jobId: number): ConflictError =>
+  new ConflictError(`Job ${jobId} was cancelled`);
 
 /** The attempt's outcome from the failure decision; a swept lease is told apart from a fail. */
 export const attemptOutcome = (next: FailureDecision["next"], expired: boolean): AttemptOutcome => {
@@ -204,6 +209,7 @@ export const claimStep = async (req: ClaimRequest): Promise<ClaimedStep | null> 
     );
 
     const inputs = await resolveInputs(client, schema, chosen.job_id, chosenDef);
+    const deliver = await deliverables(client, schema, chosen.job_id, chosenDef);
 
     await client.query("COMMIT");
 
@@ -220,6 +226,7 @@ export const claimStep = async (req: ClaimRequest): Promise<ClaimedStep | null> 
       inputs,
       params: jobParams[chosen.step_id] ?? {},
       job: { id: chosen.job_id, idempotency_key: chosen.idempotency_key, params: jobParams },
+      deliver,
       credentials: null,
     };
   } catch (error) {
@@ -228,6 +235,20 @@ export const claimStep = async (req: ClaimRequest): Promise<ClaimedStep | null> 
   } finally {
     client.release();
   }
+};
+
+/** The job's declared outputs (job_output) that this step produces. */
+const deliverables = async (
+  client: PoolClient,
+  schema: string,
+  jobId: number,
+  def: StepDefinition,
+): Promise<Deliverable[]> => {
+  const outputs = await client.query(
+    `SELECT artifact_name, path FROM ${schema}.job_output WHERE job_id = $1`,
+    [jobId],
+  );
+  return deliverablesForStep(def, outputs.rows);
 };
 
 /**
@@ -295,6 +316,8 @@ export const heartbeatStep = async (
     [jobId, stepId, leaseToken],
   );
   if (result.rows.length === 0) {
+    const job = await pool.query(`SELECT status FROM ${schema}.job WHERE id = $1`, [jobId]);
+    if (job.rows[0]?.status === "cancelled") throw cancelledConflict(jobId);
     throw new ConflictError("Lease token does not match the current lease");
   }
   if (progress !== undefined || log !== undefined) {
@@ -339,10 +362,14 @@ export const completeStep = async (
     await client.query("BEGIN");
     const row = await lockStep(client, schema, jobId, stepId);
     if (!row) throw new RunnerRequestError(`Step ${jobId}/${stepId} not found`);
+    if (row.job_status === "cancelled") throw cancelledConflict(jobId);
     if (row.lease_token !== req.lease_token) {
       throw new ConflictError("Lease token does not match the current lease");
     }
     const def = stepDefinition(row);
+    const deliver = await deliverables(client, schema, jobId, def);
+    const deliveredError = checkDelivered(req.delivered, deliver);
+    if (deliveredError) throw new RunnerRequestError(deliveredError);
 
     const expectedSlots = Object.keys(def.outputs);
     const givenSlots = Object.keys(req.artifacts ?? {});
@@ -391,6 +418,16 @@ export const completeStep = async (
           stepId,
           artifact.metadata ? JSON.stringify(artifact.metadata) : null,
         ],
+      );
+    }
+
+    for (const d of deliver) {
+      const uri = req.delivered?.[d.slot];
+      if (uri === undefined) continue;
+      await client.query(
+        `UPDATE ${schema}.job_output SET delivered_uri = $3, delivered_at = now()
+         WHERE job_id = $1 AND artifact_name = $2`,
+        [jobId, d.artifact_name, uri],
       );
     }
 
@@ -454,6 +491,7 @@ export const failStep = async (
     await client.query("BEGIN");
     const row = await lockStep(client, schema, jobId, stepId);
     if (!row) throw new RunnerRequestError(`Step ${jobId}/${stepId} not found`);
+    if (row.job_status === "cancelled") throw cancelledConflict(jobId);
     if (row.lease_token !== req.lease_token) {
       throw new ConflictError("Lease token does not match the current lease");
     }

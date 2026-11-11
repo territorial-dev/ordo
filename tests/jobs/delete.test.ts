@@ -44,7 +44,7 @@ describe('deleteBlocker', () => {
   });
 
   it('allows a failed job none of whose steps succeeded or is running', () => {
-    expect(DELETABLE_FAILED_STEP_STATUSES).toEqual(new Set(['pending', 'blocked', 'failed', 'skipped']));
+    expect(DELETABLE_FAILED_STEP_STATUSES).toEqual(new Set(['pending', 'blocked', 'failed', 'skipped', 'cancelled']));
     expect(deleteBlocker('failed', [{ step_id: 'ingest', status: 'failed' }, { step_id: 'finalize', status: 'skipped' }])).toBeNull();
     expect(deleteBlocker('failed', [{ step_id: 'a', status: 'pending' }, { step_id: 'b', status: 'blocked' }])).toBeNull();
   });

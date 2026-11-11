@@ -114,6 +114,6 @@ describe('countJobs', () => {
     const [sql, params] = mockQuery.mock.calls[0];
     expect(sql).toBe('SELECT status, COUNT(*)::int AS n FROM test.job WHERE idempotency_key LIKE ANY($1::text[]) GROUP BY status');
     expect(params).toEqual([['ingest\\_ecmwf:%']]);
-    expect(counts).toEqual({ total: 3696, by_status: { pending: 3692, running: 0, success: 0, failed: 4 } });
+    expect(counts).toEqual({ total: 3696, by_status: { pending: 3692, running: 0, success: 0, failed: 4, cancelled: 0 } });
   });
 });
