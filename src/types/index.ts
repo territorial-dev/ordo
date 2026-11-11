@@ -34,8 +34,11 @@ export interface Recipe {
 export interface Job {
   id: number;
   recipe_id: number;
-  /** "success" is written by the runner API and the n8n finalizer; "completed" is the legacy spelling. */
-  status: "pending" | "running" | "success" | "completed" | "failed" | "partial";
+  /**
+   * "success" is written by the runner API and the n8n finalizer; "completed" is the legacy
+   * spelling. "cancelled" is set by POST /jobs/:id/cancel.
+   */
+  status: "pending" | "running" | "success" | "completed" | "failed" | "cancelled";
   created_at: Date;
   started_at: Date | null;
   finished_at: Date | null;
@@ -50,7 +53,7 @@ export interface JobStep {
   job_id: number;
   step_id: string;
   step_type: string;
-  status: "pending" | "running" | "blocked" | "success" | "failed" | "skipped";
+  status: "pending" | "running" | "blocked" | "success" | "failed" | "skipped" | "cancelled";
   attempt: number;
   claimed_by: string | null;
   claimed_at: Date | null;
@@ -225,12 +228,16 @@ export interface ClaimedStep {
   inputs: Record<string, { type: string; uri: string; hash: string; metadata: Record<string, any> | null }>;
   params: Record<string, any>;
   job: { id: number; idempotency_key: string | null; params: Record<string, Record<string, any>> };
+  /** The job's declared outputs this step produces; the runner delivers them before `complete`. */
+  deliver: Array<{ slot: string; artifact_name: string; path: string }>;
   credentials: null;
 }
 
 export interface CompleteRequest {
   lease_token: string;
   artifacts: Record<string, { type: string; uri: string; hash: string; metadata?: Record<string, any> }>;
+  /** Where the runner delivered the step's declared outputs, keyed by output slot (see `deliver`). */
+  delivered?: Record<string, string>;
   /** What the attempt used, as the runner measured it; stored with the attempt row as is. */
   usage?: Record<string, any>;
 }
@@ -243,4 +250,20 @@ export interface FailRequest {
   cooldown_seconds?: number;
   /** What the attempt used, as the runner measured it; stored with the attempt row as is. */
   usage?: Record<string, any>;
+}
+
+export interface CancelJobResult {
+  id: number;
+  status: "cancelled";
+  /** True when the job was already cancelled: nothing changed. */
+  already_cancelled: boolean;
+  /** Steps this call stopped (pending, blocked or running before). */
+  steps_cancelled: string[];
+  /**
+   * Steps that were running: their runner must stop the work. An `api` runner learns it from
+   * the 409 on its next heartbeat; an `n8n` runner by watching for cancelled jobs.
+   */
+  running: Array<{ step_id: string; step_type: string; claimed_by: string | null }>;
+  /** Outputs that had been delivered; their delivered_uri is cleared and the runner removes the copies. */
+  withdrawn: Array<{ artifact_name: string; path: string; delivered_uri: string }>;
 }

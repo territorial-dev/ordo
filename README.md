@@ -251,7 +251,7 @@ A malformed value answers `400` with the reason. Examples: the oldest pending jo
 How many jobs match, per status, without listing them. Takes the same filters (`order` and `limit` are ignored); every status appears, zero when no job has it.
 
 ```json
-{ "total": 3696, "by_status": { "pending": 3692, "running": 0, "success": 0, "failed": 4 } }
+{ "total": 3696, "by_status": { "pending": 3692, "running": 0, "success": 0, "failed": 4, "cancelled": 0 } }
 ```
 
 ### GET /steps/counts
@@ -284,6 +284,7 @@ Every attempt that ended since `finished_after` (ISO, default 48 hours back, at 
 | `failed` | Failed for good (attempts exhausted or `retry: false`) |
 | `wait` | `kind: wait`; consumes no attempt |
 | `lease_expired` | The runner stopped heartbeating; the sweeper requeued the step |
+| `cancelled` | The job was cancelled while the step ran (since 1.17) |
 
 `hours` groups by hour, step type, worker (`claimed_by`), outcome and `reason` (the error up to its first `:`, at most 60 characters; null for a success) with the attempt count and the seconds from claim to end. `durations` gives the median and 90th percentile of successful attempts per step type; `recent` the newest 50 failed attempts (`retry`, `failed`, `lease_expired`; waits are counted in `hours` only), with their error (at most 500 characters) and the job's idempotency key.
 
@@ -310,20 +311,46 @@ The attempts that carried a `usage` object (since 1.16), newest first. Query: `f
 
 ### POST /jobs/:id/retry
 
-Requeues a failed job under its own id and idempotency key. The failed step and the steps skipped because of it go back to `pending` with their attempt counters cleared; succeeded steps keep their artifacts, so the job resumes where it broke. The job becomes `pending` with its error cleared. An optional body `{ "priority": 100 }` changes the job's priority at the same time.
+Requeues a failed or cancelled job under its own id and idempotency key. The failed step, the steps skipped because of it and the steps a cancel stopped go back to `pending` with their attempt counters cleared; succeeded steps keep their artifacts, so the job resumes where it broke. A cancel withdraws what the job had delivered (see below), so for a **cancelled** job the succeeded steps that produce a declared output run again as well, to deliver it again. The job becomes `pending` with its error cleared. An optional body `{ "priority": 100 }` changes the job's priority at the same time.
 
-**Response** `200`: `{ "id": 812, "status": "pending", "priority": 0, "steps_reset": ["harmonize", "finalize"] }`. `404` when the job does not exist, `409` when it is not `failed`. Requires the `scheduler` role (admins included).
+**Response** `200`: `{ "id": 812, "status": "pending", "priority": 0, "steps_reset": ["harmonize", "finalize"] }`. `404` when the job does not exist, `409` when it is neither `failed` nor `cancelled`. Requires the `scheduler` role (admins included).
+
+### POST /jobs/:id/cancel
+
+Cancels an open (`pending` or `running`) job, in one transaction:
+
+- the job becomes `cancelled`, with `finished_at` set and `error` = `cancelled` or `cancelled: <reason>`;
+- every step that has not finished (`pending`, `blocked`, `running`) becomes `cancelled`; succeeded, failed and skipped steps keep their state;
+- running steps lose their lease, and each running attempt is recorded with the outcome `cancelled` (`GET /steps/attempts`);
+- outputs already delivered are **withdrawn**: their `delivered_uri` and `delivered_at` are cleared and listed in the response, and the runner removes the copies (storage is the runner's job).
+
+Cancelling does not stop work by itself; runners do. An `api` runner gets `409` with `Job <id> was cancelled` on its next heartbeat, `complete` or `fail`, and must stop the step and not retry it. An `n8n` runner never claims steps of a cancelled job (its claim filters on the job's status) and must watch for cancelled jobs whose steps it is running (see [Using Ordo with n8n](USING_WITH_N8N.md)). Artifacts already registered are kept: another job may read the same sources. Nothing else runs for a cancelled job; in particular no `on_exit`.
+
+Optional body: `{ "reason": "wrong input file" }` (a string of at most 500 characters).
+
+**Response** `200`:
+
+```json
+{
+  "id": 812, "status": "cancelled", "already_cancelled": false,
+  "steps_cancelled": ["build_copc", "dataset_info"],
+  "running": [{ "step_id": "build_copc", "step_type": "BUILD_COPC", "claimed_by": "n8n-dev:479661" }],
+  "withdrawn": [{ "artifact_name": "step:reproject.las", "path": "results/812/las", "delivered_uri": "bucket/results/812/las/output.las" }]
+}
+```
+
+Cancelling a cancelled job changes nothing and answers `200` with `already_cancelled: true`. `404` when the job does not exist, `409` (`Job is success, not pending or running`) when it already finished. Requires the `scheduler` role (admins included). A cancelled job can be requeued with `POST /jobs/:id/retry` and deleted with `DELETE /jobs/:id` under the same rule as a failed one.
 
 **Job-Level Outputs:**
 
-Job-level outputs declare which artifacts should be finalized after a job completes. The API validates that all requested outputs exist in the recipe's producible artifact set, but does not copy, move, or interact with storage. All file operations are performed by n8n workflows after job completion.
+Job-level outputs declare which artifacts should be delivered, and where. The API validates that all requested outputs exist in the recipe's producible artifact set, but does not copy, move, or interact with storage: runners do. Since 1.17 a runner delivers each declared output at the end of the step that produces it: the claim lists them (`deliver`) and `complete` records where they went (`delivered`, written to `job_output.delivered_uri`). A job therefore reaches `success` with every output delivered; a failed job keeps what its succeeded steps delivered; a cancelled job has its deliveries withdrawn. Older runners may still deliver after the job ends (the n8n finalizer) and write `delivered_uri` themselves.
 
 - **Recipe-level outputs**: Used only to link steps in the DAG, always written to staging storage
 - **Job-level outputs**: Declared at job creation, reference artifact names produced by recipe steps, define final destination paths, imply stable/no-TTL retention
 
 ### DELETE /jobs/:id
 
-Deletes a job none of whose steps has started: every step is `pending` or `blocked` (waiting for an input) and the job is still open. A **failed** job is deletable too when none of its steps succeeded or is running (its steps are `pending`, `blocked`, `failed` or `skipped`): it produced nothing, and a client that knows it can never succeed (an input that will never exist) removes it instead of leaving it failed for ever. A job with a succeeded step, and every finished job, stays, so no artifact ever loses its record; a finished job is history, not queue. The job's steps, artifacts, outputs, step detailing and attempt history go with it, in one transaction. The step rows are locked first, so a runner claiming at the same moment skips them.
+Deletes a job none of whose steps has started: every step is `pending` or `blocked` (waiting for an input) and the job is still open. A **failed** or **cancelled** job is deletable too when none of its steps succeeded or is running (its steps are `pending`, `blocked`, `failed`, `skipped` or `cancelled`): it produced nothing, and a client that knows it can never succeed (an input that will never exist) removes it instead of leaving it failed for ever. A job with a succeeded step, and every finished job, stays, so no artifact ever loses its record; a finished job is history, not queue. The job's steps, artifacts, outputs, step detailing and attempt history go with it, in one transaction. The step rows are locked first, so a runner claiming at the same moment skips them.
 
 **Response** `200`: `{ "id": 812, "idempotency_key": "ingest_ecmwf:20240201T00Z:oper:precip:1.0.0", "deleted": true }`. `404` when the job does not exist, `409` with the reason (`Step harmonize is running, not pending`; `Step ingest is success; a failed job is deleted only when no step succeeded`) when it cannot be deleted. Requires the `scheduler` role (admins included).
 
@@ -501,21 +528,24 @@ Ordo picks one step, atomically (`FOR UPDATE SKIP LOCKED`), that is `pending` or
   "inputs": { "index": { "type": "json", "uri": "s3://…", "hash": "…", "metadata": null } },
   "params": { "run": "2026-10-19T00" },
   "job": { "id": 812, "idempotency_key": "ingest_ecmwf:20261019T00Z:oper:1.0.0", "params": {} },
+  "deliver": [{ "slot": "zarr", "artifact_name": "step:ingest.zarr", "path": "deliveries/812" }],
   "credentials": null
 }
 ```
 
-`204` when nothing matches. `inputs` is keyed by the step's input slots and resolved to the registered artifacts. The lease length is the recipe step's `lease_seconds` if set, else the request's, else the executor's default. `credentials` is reserved for step-scoped storage credentials.
+`204` when nothing matches. `inputs` is keyed by the step's input slots and resolved to the registered artifacts. `deliver` (since 1.17) lists the job's declared outputs that this step produces, by output slot, with the requested destination `path` (a directory); it is empty when the job declares none. The runner copies each one there before `complete` and reports it in `delivered`. The lease length is the recipe step's `lease_seconds` if set, else the request's, else the executor's default. `credentials` is reserved for step-scoped storage credentials.
 
 **Capability matching.** `requires` and `capabilities` are flat objects. For each key in `requires`: a number requires `capabilities[key] >= value`; a boolean or string requires equality; a list requires every element to be present in the capability list. A missing capability fails the match.
 
 ### `POST /runner/steps/:job_id/:step_id/heartbeat`
 
-`{ "lease_token": "…", "progress": { "percent": 40 }, "log": "downloaded 12/30" }` extends the lease by the step's `lease_seconds` and, when `progress` or `log` is given, appends a `job_step_detailing` row. `409` when the token does not match the current lease: the worker must abort the step immediately.
+`{ "lease_token": "…", "progress": { "percent": 40 }, "log": "downloaded 12/30" }` extends the lease by the step's `lease_seconds` and, when `progress` or `log` is given, appends a `job_step_detailing` row. `409` when the token does not match the current lease: the worker must abort the step immediately. When the job was cancelled, the `409` says `Job <id> was cancelled` (since 1.17), so a runner can tell a cancel from a lost lease; the same answer comes from `complete` and `fail`.
 
 ### `POST /runner/steps/:job_id/:step_id/complete`
 
-`{ "lease_token": "…", "artifacts": { "zarr": { "type": "zarr", "uri": "s3://…", "hash": "sha256:…", "metadata": {} } } }`, keyed by the executor's output slots (all of them, nothing else). Registers the artifacts under the recipe's output names (`step:<id>.<slot>`) with `producer_step` set, marks the step `success`, and when no step remains open marks the job `success` (all steps succeeded) or `failed`. Returns `{ "job_status": "…" }`. Idempotent: a repeat with identical artifacts returns `200` and changes nothing; a repeat with different artifacts returns `409`.
+`{ "lease_token": "…", "artifacts": { "zarr": { "type": "zarr", "uri": "s3://…", "hash": "sha256:…", "metadata": {} } } }`, keyed by the executor's output slots (all of them, nothing else). Registers the artifacts under the recipe's output names (`step:<id>.<slot>`) with `producer_step` set, marks the step `success`, and when no step remains open marks the job `success` (all steps succeeded) or `failed`. Returns `{ "job_status": "…" }`.
+
+**`delivered` (since 1.17, optional).** `{ "zarr": "bucket/deliveries/812/out.zarr/" }`, keyed by the step's deliverable slots (see `deliver` in the claim), each value where the runner wrote the copy. Ordo sets `job_output.delivered_uri` and `delivered_at` in the same transaction that marks the step `success`. A slot the step does not deliver, or a value that is not a non-empty string, answers `400` and changes nothing. Runners that do not deliver send nothing. Idempotent: a repeat with identical artifacts returns `200` and changes nothing; a repeat with different artifacts returns `409`.
 
 ### `POST /runner/steps/:job_id/:step_id/fail`
 

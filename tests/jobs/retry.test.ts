@@ -38,10 +38,35 @@ describe('stepsToReset', () => {
 });
 
 describe('canRetry', () => {
-  it('only a failed job can be retried', () => {
+  it('a failed or cancelled job can be retried, nothing else', () => {
     expect(canRetry('failed')).toBe(true);
+    expect(canRetry('cancelled')).toBe(true);
     for (const s of ['pending', 'running', 'success', 'completed', 'partial']) {
       expect(canRetry(s)).toBe(false);
     }
+  });
+});
+
+describe('stepsToReset with cancelled steps and redelivery', () => {
+  it('resets the steps a cancel stopped', () => {
+    const steps = [
+      { step_id: 'reproject', status: 'success' },
+      { step_id: 'build_copc', status: 'cancelled' },
+      { step_id: 'dataset_info', status: 'cancelled' },
+    ];
+    expect(stepsToReset(steps)).toEqual(['build_copc', 'dataset_info']);
+  });
+
+  it('also resets succeeded steps whose delivered output was withdrawn', () => {
+    const steps = [
+      { step_id: 'reproject', status: 'success' },
+      { step_id: 'dataset_info', status: 'success' },
+      { step_id: 'build_copc', status: 'cancelled' },
+    ];
+    expect(stepsToReset(steps, new Set(['dataset_info']))).toEqual(['dataset_info', 'build_copc']);
+  });
+
+  it('never resets a step listed for redelivery that did not succeed twice', () => {
+    expect(stepsToReset([{ step_id: 'a', status: 'failed' }], new Set(['a']))).toEqual(['a']);
   });
 });
