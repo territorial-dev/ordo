@@ -1,3 +1,10 @@
+# [1.17.0](https://github.com/territorial-dev/ordo/compare/v1.16.0...v1.17.0) (2026-11-11)
+
+
+### Features
+
+* cancel jobs, and deliver outputs at the end of the step that produces them ([9ffb503](https://github.com/territorial-dev/ordo/commit/9ffb50362aebb13e2fe599d1de32b9a6ec6a5d4d))
+
 # [1.16.0](https://github.com/territorial-dev/ordo/compare/v1.15.0...v1.16.0) (2026-11-09)
 
 
