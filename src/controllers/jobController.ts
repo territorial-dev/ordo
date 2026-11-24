@@ -1,5 +1,5 @@
 import { Request, Response } from "express";
-import { cancelJob, countJobs, createJob, deleteJob, deleteJobs, getJobStatus, getJobsBatch, JobFilterError, listJobs, parseJobFilter, retryJob } from "../services/jobService";
+import { cancelJob, countJobs, createJob, deleteFinishedJobs, deleteJob, deleteJobs, getJobStatus, getJobsBatch, JobFilterError, listJobs, parseFinishedJobsFilter, parseJobFilter, retryJob } from "../services/jobService";
 import { ConflictError } from "../services/runnerService";
 import { CreateJobRequest } from "../types";
 import { parsePriority } from "../utils/jobs";
@@ -356,6 +356,24 @@ export const deleteJobsHandler = async (
       return;
     }
     console.error("Error deleting jobs:", error);
+    res.status(500).json({ error: "Internal server error" });
+  }
+};
+
+/** DELETE /jobs/finished?key_prefix=…&older_than_days=N[&status=…][&limit=…]: retention. */
+export const deleteFinishedJobsHandler = async (
+  req: Request,
+  res: Response,
+): Promise<void> => {
+  try {
+    const filter = parseFinishedJobsFilter(req.query as Record<string, unknown>);
+    res.json(await deleteFinishedJobs(filter));
+  } catch (error) {
+    if (error instanceof JobFilterError) {
+      res.status(400).json({ error: error.message });
+      return;
+    }
+    console.error("Error deleting finished jobs:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 };

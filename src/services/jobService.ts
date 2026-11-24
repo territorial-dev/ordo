@@ -1015,3 +1015,132 @@ export const deleteJobs = async (filter: ListJobsFilter): Promise<DeleteJobsResu
     client.release();
   }
 };
+
+/** Job statuses `DELETE /jobs/finished` may delete: every finished state (`partial` is the n8n finalizer's). */
+export const FINISHED_JOB_STATUSES: readonly string[] = ["success", "failed", "cancelled", "partial"];
+/** The youngest a finished job may be and still be deleted by retention, in days. */
+export const RETENTION_MIN_DAYS = 1;
+export const RETENTION_MAX_DAYS = 36_500;
+export const RETENTION_DEFAULT_LIMIT = 1_000;
+export const RETENTION_MAX_LIMIT = 10_000;
+
+export interface FinishedJobsFilter {
+  /** Idempotency key starts with any of these; required. */
+  key_prefix: string[];
+  /** Only jobs whose finished_at is more than this many days ago. */
+  older_than_days: number;
+  /** Any of these finished statuses; defaults to all of FINISHED_JOB_STATUSES. */
+  status: string[];
+  /** At most this many jobs per call, oldest finished first. */
+  limit: number;
+}
+
+/** The retention filter from `DELETE /jobs/finished`'s query string; throws JobFilterError. */
+export function parseFinishedJobsFilter(query: Record<string, unknown>): FinishedJobsFilter {
+  const prefixes = query.key_prefix === undefined ? [] : listOf(query.key_prefix);
+  if (prefixes.length === 0) throw new JobFilterError("key_prefix is required to delete finished jobs");
+  if (prefixes.length > 100) throw new JobFilterError("at most 100 key prefixes");
+  if (query.older_than_days === undefined) throw new JobFilterError("older_than_days is required");
+  const days = Number(query.older_than_days);
+  if (!Number.isInteger(days) || days < RETENTION_MIN_DAYS || days > RETENTION_MAX_DAYS) {
+    throw new JobFilterError(`older_than_days must be an integer from ${RETENTION_MIN_DAYS} to ${RETENTION_MAX_DAYS}`);
+  }
+  let status = [...FINISHED_JOB_STATUSES];
+  if (query.status !== undefined) {
+    status = listOf(query.status);
+    if (status.length === 0) throw new JobFilterError("status is empty");
+    const open = status.find((s) => !FINISHED_JOB_STATUSES.includes(s));
+    if (open !== undefined) {
+      throw new JobFilterError(`status must be finished (${FINISHED_JOB_STATUSES.join(", ")}), got ${JSON.stringify(open)}`);
+    }
+  }
+  let limit = RETENTION_DEFAULT_LIMIT;
+  if (query.limit !== undefined) {
+    limit = Number(query.limit);
+    if (!Number.isInteger(limit) || limit < 1 || limit > RETENTION_MAX_LIMIT) {
+      throw new JobFilterError(`limit must be an integer from 1 to ${RETENTION_MAX_LIMIT}`);
+    }
+  }
+  return { key_prefix: prefixes, older_than_days: days, status, limit };
+}
+
+export interface DeleteFinishedJobsResult {
+  /** Jobs deleted. */
+  deleted: number;
+  /** Rows deleted with them, per table. */
+  rows: {
+    job_step: number;
+    job_step_attempt: number;
+    job_step_detailing: number;
+    job_artifact: number;
+    job_output: number;
+  };
+  /** Matching jobs left alone because a step was still running when the rows were locked. */
+  skipped: number;
+  /** The call hit its limit: more jobs may match, so call again. */
+  more: boolean;
+}
+
+/**
+ * Retention for `DELETE /jobs/finished`: deletes finished jobs (success, failed, cancelled,
+ * partial) whose key starts with a prefix and that finished more than `older_than_days` ago,
+ * oldest first, at most `limit` per call, in one transaction. The job rows are locked
+ * `FOR UPDATE` (a retry racing the call re-checks the status after the lock and drops out), then
+ * the step rows; a job with a step still running (a failed job's parallel branch) is skipped.
+ * Attempts and detailing are deleted explicitly to count them (they would cascade anyway).
+ * Jobs that never finished (finished_at null) are never selected.
+ */
+export const deleteFinishedJobs = async (filter: FinishedJobsFilter): Promise<DeleteFinishedJobsResult> => {
+  if (filter.key_prefix.length === 0) {
+    throw new JobFilterError("key_prefix is required to delete finished jobs");
+  }
+  if (!Number.isInteger(filter.older_than_days) || filter.older_than_days < RETENTION_MIN_DAYS) {
+    throw new JobFilterError(`older_than_days must be at least ${RETENTION_MIN_DAYS}`);
+  }
+  const pool = getPool();
+  const schema = getSchema();
+  const client = await pool.connect();
+  const rows = { job_step: 0, job_step_attempt: 0, job_step_detailing: 0, job_artifact: 0, job_output: 0 };
+  try {
+    await client.query("BEGIN");
+    const jobs = await client.query(
+      `SELECT j.id FROM ${schema}.job j
+       WHERE j.status = ANY($1::text[])
+         AND j.idempotency_key LIKE ANY($2::text[])
+         AND j.finished_at < now() - make_interval(days => $3::int)
+         AND NOT EXISTS (SELECT 1 FROM ${schema}.job_step s WHERE s.job_id = j.id AND s.status = 'running')
+       ORDER BY j.finished_at, j.id
+       LIMIT $4
+       FOR UPDATE`,
+      [filter.status, filter.key_prefix.map(likePrefix), filter.older_than_days, filter.limit],
+    );
+    const ids: number[] = jobs.rows.map((r) => Number(r.id));
+    if (ids.length === 0) {
+      await client.query("COMMIT");
+      return { deleted: 0, rows, skipped: 0, more: false };
+    }
+    const steps = await client.query(
+      `SELECT job_id, status FROM ${schema}.job_step WHERE job_id = ANY($1::int[])
+       ORDER BY job_id, step_id FOR UPDATE`,
+      [ids],
+    );
+    const running = new Set<number>(
+      steps.rows.filter((r) => r.status === "running").map((r) => Number(r.job_id)),
+    );
+    const deletable = ids.filter((id) => !running.has(id));
+    if (deletable.length > 0) {
+      for (const table of ["job_step_attempt", "job_step_detailing", "job_output", "job_artifact", "job_step"] as const) {
+        const result = await client.query(`DELETE FROM ${schema}.${table} WHERE job_id = ANY($1::int[])`, [deletable]);
+        rows[table] = result.rowCount ?? 0;
+      }
+      await client.query(`DELETE FROM ${schema}.job WHERE id = ANY($1::int[])`, [deletable]);
+    }
+    await client.query("COMMIT");
+    return { deleted: deletable.length, rows, skipped: ids.length - deletable.length, more: ids.length === filter.limit };
+  } catch (error) {
+    await client.query("ROLLBACK");
+    throw error;
+  } finally {
+    client.release();
+  }
+};

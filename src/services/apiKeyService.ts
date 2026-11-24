@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "crypto";
 import { getPool, getSchema } from "../db/connection";
 import { ApiKeyRecord, Role } from "../types";
 
-export const ROLES: Role[] = ["admin", "scheduler", "runner"];
+export const ROLES: Role[] = ["admin", "scheduler", "runner", "reader"];
 
 export const hashKey = (key: string): string =>
   createHash("sha256").update(key).digest("hex");

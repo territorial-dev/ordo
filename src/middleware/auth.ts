@@ -67,3 +67,17 @@ export const requireRole = (...roles: Role[]) => {
     res.status(403).json({ error: `Requires role: ${roles.join(" or ")}` });
   };
 };
+
+/** HTTP methods that only read; Express answers HEAD with the GET route. */
+const READ_METHODS: ReadonlySet<string> = new Set(["GET", "HEAD"]);
+
+/**
+ * One gate for a group of routes that mixes reads and writes: a read (GET, HEAD) allows
+ * `readRoles`, every other method allows `writeRoles`; admin always passes.
+ */
+export const requireRoleByMethod = (readRoles: Role[], writeRoles: Role[]) => {
+  const read = requireRole(...readRoles);
+  const write = requireRole(...writeRoles);
+  return (req: Request, res: Response, next: NextFunction): void =>
+    READ_METHODS.has(req.method) ? read(req, res, next) : write(req, res, next);
+};
