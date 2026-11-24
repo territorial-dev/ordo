@@ -1,3 +1,10 @@
+# [1.18.0](https://github.com/territorial-dev/ordo/compare/v1.17.0...v1.18.0) (2026-11-24)
+
+
+### Features
+
+* reader role for read-only keys, and retention of finished jobs (DELETE /jobs/finished) ([f092887](https://github.com/territorial-dev/ordo/commit/f092887fef1d3607a53b178aa6b4ebc89787bb8a))
+
 # [1.17.0](https://github.com/territorial-dev/ordo/compare/v1.16.0...v1.17.0) (2026-11-11)
 
 
