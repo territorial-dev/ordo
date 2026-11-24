@@ -99,8 +99,9 @@ All endpoints (except `/health`) require Bearer token authentication via the `Au
 | `admin` | Humans, `API_TOKEN` | Everything, including key management |
 | `scheduler` | A job factory (for example Ara's scheduler) | Create jobs and recipes, read everything, upsert `api`-runner executors |
 | `runner` | A worker claiming steps over HTTP | `/runner/*` and `GET /jobs/:id` |
+| `reader` | A dashboard or monitor (since 1.18) | Every `GET` route a `scheduler` may call, nothing that writes (`POST /recipes/validate` included); not `/keys` |
 
-Requests with a valid key but the wrong role get `403`.
+Requests with a valid key but the wrong role get `403`. Where a route below says it requires the `scheduler` role, a `GET` route also accepts `reader`.
 
 ### POST /recipes
 
@@ -256,7 +257,7 @@ How many jobs match, per status, without listing them. Takes the same filters (`
 
 ### GET /steps/counts
 
-The open steps of open jobs, grouped by step type, state and the job's priority: what a dashboard needs to split a backlog by kind of work. Requires the `scheduler` role.
+The open steps of open jobs, grouped by step type, state and the job's priority: what a dashboard needs to split a backlog by kind of work. Requires the `scheduler` or `reader` role.
 
 | `state` | Meaning |
 |---|---|
@@ -275,7 +276,7 @@ The open steps of open jobs, grouped by step type, state and the job's priority:
 
 ### GET /steps/attempts
 
-Every attempt that ended since `finished_after` (ISO, default 48 hours back, at most 14 days back; `400` otherwise). A step row keeps only its last state and error; each claim that ends in `complete`, `fail` or a lease expiry also writes one row to `job_step_attempt` (since 1.13), so retries, waits and lost leases can be counted. Requires the `scheduler` role.
+Every attempt that ended since `finished_after` (ISO, default 48 hours back, at most 14 days back; `400` otherwise). A step row keeps only its last state and error; each claim that ends in `complete`, `fail` or a lease expiry also writes one row to `job_step_attempt` (since 1.13), so retries, waits and lost leases can be counted. Requires the `scheduler` or `reader` role.
 
 | `outcome` | Meaning |
 |---|---|
@@ -300,7 +301,7 @@ Every attempt that ended since `finished_after` (ISO, default 48 hours back, at 
 
 ### GET /steps/usage
 
-The attempts that carried a `usage` object (since 1.16), newest first. Query: `finished_after` (ISO, default 7 days back, at most 14 days back), `step_type` (one type or a comma list), `worker` (`claimed_by`), `limit` (1 to 50,000, default 10,000; `truncated` says whether more rows matched). Requires the `scheduler` role.
+The attempts that carried a `usage` object (since 1.16), newest first. Query: `finished_after` (ISO, default 7 days back, at most 14 days back), `step_type` (one type or a comma list), `worker` (`claimed_by`), `limit` (1 to 50,000, default 10,000; `truncated` says whether more rows matched). Requires the `scheduler` or `reader` role.
 
 ```json
 { "finished_after": "2026-11-02T20:00:00.000Z", "limit": 10000, "truncated": false,
@@ -350,7 +351,7 @@ Job-level outputs declare which artifacts should be delivered, and where. The AP
 
 ### DELETE /jobs/:id
 
-Deletes a job none of whose steps has started: every step is `pending` or `blocked` (waiting for an input) and the job is still open. A **failed** or **cancelled** job is deletable too when none of its steps succeeded or is running (its steps are `pending`, `blocked`, `failed`, `skipped` or `cancelled`): it produced nothing, and a client that knows it can never succeed (an input that will never exist) removes it instead of leaving it failed for ever. A job with a succeeded step, and every finished job, stays, so no artifact ever loses its record; a finished job is history, not queue. The job's steps, artifacts, outputs, step detailing and attempt history go with it, in one transaction. The step rows are locked first, so a runner claiming at the same moment skips them.
+Deletes a job none of whose steps has started: every step is `pending` or `blocked` (waiting for an input) and the job is still open. A **failed** or **cancelled** job is deletable too when none of its steps succeeded or is running (its steps are `pending`, `blocked`, `failed`, `skipped` or `cancelled`): it produced nothing, and a client that knows it can never succeed (an input that will never exist) removes it instead of leaving it failed for ever. A job with a succeeded step, and every finished job, stays, so no artifact ever loses its record; a finished job is history, not queue, and leaves only through retention (`DELETE /jobs/finished`). The job's steps, artifacts, outputs, step detailing and attempt history go with it, in one transaction. The step rows are locked first, so a runner claiming at the same moment skips them.
 
 **Response** `200`: `{ "id": 812, "idempotency_key": "ingest_ecmwf:20240201T00Z:oper:precip:1.0.0", "deleted": true }`. `404` when the job does not exist, `409` with the reason (`Step harmonize is running, not pending`; `Step ingest is success; a failed job is deleted only when no step succeeded`) when it cannot be deleted. Requires the `scheduler` role (admins included).
 
@@ -361,6 +362,24 @@ The bulk form: deletes every matching job the rule above allows (an open job non
 ```json
 { "deleted": [801, 802, 805], "skipped": 2 }
 ```
+
+### DELETE /jobs/finished?key_prefix=…&older_than_days=N
+
+Retention (since 1.18): deletes finished jobs, the history `DELETE /jobs` keeps, once they are old enough. A job goes when its status is finished (`success`, `failed`, `cancelled`, or `partial` from the n8n finalizer), its `idempotency_key` starts with one of `key_prefix` (one or a comma list, at most 100, matched literally), and its `finished_at` is more than `older_than_days` days ago. Its steps, attempts (with their `usage`), step detailing, artifacts and outputs go with it. Ordo deletes only its records: delivered files and artifact objects stay where the runners put them.
+
+Query:
+- `key_prefix` (required): a call can never empty the table by accident.
+- `older_than_days` (required): a whole number from 1 to 36,500, so nothing that finished in the last day can go.
+- `status` (optional): one finished status or a comma list; default all four. An open status (`pending`, `running`) is a `400`.
+- `limit` (optional): at most this many jobs per call, from 1 to 10,000, default 1,000.
+
+Jobs go oldest finished first, at most `limit` per call, in one transaction, so a large backlog is cleared in bounded batches: call again while `more` is `true`. The job rows are locked first (a job retried at the same moment drops out), then their step rows; a job with a step still running (a failed job's parallel branch) is skipped and counted in `skipped`. A job that never finished (`finished_at` null) is never deleted.
+
+```json
+{ "deleted": 840, "rows": { "job_step": 1680, "job_step_attempt": 1702, "job_step_detailing": 1680, "job_artifact": 2520, "job_output": 840 }, "skipped": 0, "more": false }
+```
+
+Deleting a job frees its `idempotency_key`: a later `POST /jobs` with the same key creates a new job instead of answering the old one. Keep `older_than_days` longer than any window in which a client still looks a key up to decide whether the work was done. `400` on a missing or malformed parameter. Requires the `scheduler` role (admins included).
 
 ### GET /jobs/:id
 

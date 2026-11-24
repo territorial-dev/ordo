@@ -14,7 +14,7 @@ if (!process.env.DATABASE_URL) {
 
 import express, { Request, Response } from "express";
 import morgan from "morgan";
-import { authMiddleware, requireRole } from "./middleware/auth";
+import { authMiddleware, requireRole, requireRoleByMethod } from "./middleware/auth";
 import {
   createJobHandler,
   listJobsHandler,
@@ -23,6 +23,7 @@ import {
   getBatchJobStatusHandler,
   deleteJobHandler,
   deleteJobsHandler,
+  deleteFinishedJobsHandler,
   retryJobHandler,
   cancelJobHandler,
 } from "./controllers/jobController";
@@ -84,7 +85,7 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 // All other routes require authentication. API_TOKEN is the admin key; other
-// keys come from the api_key table with a role (admin, scheduler, runner).
+// keys come from the api_key table with a role (admin, scheduler, runner, reader).
 app.use(authMiddleware);
 
 // Runner API: leased step execution over HTTP (runner role)
@@ -101,11 +102,11 @@ app.delete("/keys/:id", requireRole(), revokeKeyHandler);
 // Executor registration (admin, or scheduler for runner "api")
 app.put("/step-executors/:step_type", requireRole("scheduler"), upsertExecutorHandler);
 
-// A runner may read the job it holds
-app.get("/jobs/:id([0-9]+)", requireRole("scheduler", "runner"), getJobStatusHandler);
+// A runner may read the job it holds; a reader any job
+app.get("/jobs/:id([0-9]+)", requireRole("scheduler", "runner", "reader"), getJobStatusHandler);
 
-// Everything below: admin and scheduler
-app.use(requireRole("scheduler"));
+// Everything below: admin and scheduler; reader for the reads (GET) only
+app.use(requireRoleByMethod(["scheduler", "reader"], ["scheduler"]));
 
 // Recipe endpoints
 app.get("/recipes", listRecipesHandler);
@@ -121,6 +122,7 @@ app.post("/jobs", createJobHandler);
 app.post("/jobs/:id([0-9]+)/retry", retryJobHandler);
 app.post("/jobs/:id([0-9]+)/cancel", cancelJobHandler);
 app.delete("/jobs/:id([0-9]+)", deleteJobHandler);
+app.delete("/jobs/finished", deleteFinishedJobsHandler);
 app.delete("/jobs", deleteJobsHandler);
 
 // Step endpoints (read-only): open steps by type and state, attempts that ended

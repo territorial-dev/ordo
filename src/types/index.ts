@@ -192,7 +192,7 @@ export interface UpsertStepExecutorRequest {
   lease_seconds?: number;
 }
 
-export type Role = "admin" | "scheduler" | "runner";
+export type Role = "admin" | "scheduler" | "runner" | "reader";
 
 export interface AuthContext {
   role: Role;
